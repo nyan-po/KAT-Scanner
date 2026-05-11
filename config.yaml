@@ -33,12 +33,12 @@ filters:
   min_price: 1
   max_price: null
   min_market_cap: 50000000
-  min_avg_volume: 500000
-  min_relative_volume: 1.2
+  min_avg_volume: 100000
+  min_relative_volume: null
   min_revenue_growth: null
   max_pe: null
   earnings_within_days: null
-  min_grade: B
+  min_grade: C
   exclude_etfs: false
   exclude_low_priced: false
   max_results: 50

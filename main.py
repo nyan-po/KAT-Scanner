@@ -175,7 +175,7 @@ def run_screener(tickers: list[str], mode: str, scan_type: str, cfg: dict,
     final = limit_results(sorted_results, max_results)
 
     print_scan_header(scan_type, mode, total_scanned, len(final))
-    print_results_table(final)
+    print_results_table(final, filters=filters)
 
     # Save outputs
     output_cfg = get_output_config(cfg)

@@ -106,9 +106,16 @@ def print_scan_header(scan_type: str, mode: str, total_scanned: int, total_passe
         print("=" * 80)
 
 
-def print_results_table(results: list[dict]):
+def print_results_table(results: list[dict], filters: dict | None = None):
     if not results:
-        print("No results passed filters.")
+        print("\n  No results passed filters.")
+        if filters:
+            active = {k: v for k, v in filters.items() if v is not None and v is not False}
+            if active:
+                print("  Active filters that may be too restrictive:")
+                for k, v in active.items():
+                    print(f"    --{k.replace('_', '-')} {v}")
+                print("  Try relaxing filters, e.g.: --min-grade D  or remove --min-rel-volume")
         return
 
     if _RICH:

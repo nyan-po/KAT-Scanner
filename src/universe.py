@@ -5,9 +5,16 @@ and builds a deduplicated, yfinance-compatible ticker universe.
 import re
 import time
 import logging
+import ssl
 import requests
 import pandas as pd
 from io import StringIO
+
+try:
+    import certifi
+    _SSL_VERIFY = certifi.where()
+except ImportError:
+    _SSL_VERIFY = False  # disable SSL verification if certifi not available
 
 logger = logging.getLogger(__name__)
 
@@ -18,15 +25,14 @@ SP500_URL = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
 NASDAQ100_URL = "https://en.wikipedia.org/wiki/Nasdaq-100"
 RUSSELL2000_URL = "https://en.wikipedia.org/wiki/Russell_2000_Index"
 
-# Fallback small-cap list (curated, not exhaustive)
+# Fallback small-cap list (curated, actively traded as of 2025)
 FALLBACK_SMALL_CAPS = [
     "APLD", "SOUN", "MARA", "RIOT", "CLSK", "BTBT", "HUT", "CIFR",
-    "MGNI", "ACHR", "JOBY", "ARCHER", "LILM", "SPCE", "RDW", "RKLB",
-    "ASTS", "LUNR", "MNTS", "SATL", "PL", "SPIR", "BKSY",
-    "SMR", "NNE", "OKLO", "NKLA", "HYLN", "FSR", "GOEV",
-    "IONQ", "RGTI", "QUBT", "ARQQ", "QBTS",
-    "CLOV", "HIMS", "SDCL", "TALK", "MAPS", "BARK",
-    "KTOS", "RCAT", "AVAV", "DFEN",
+    "MGNI", "ACHR", "JOBY", "RKLB", "ASTS", "LUNR", "PL", "SPIR",
+    "SMR", "NNE", "OKLO", "HYLN",
+    "IONQ", "RGTI", "QUBT", "QBTS",
+    "CLOV", "HIMS", "TALK",
+    "KTOS", "RCAT", "AVAV",
     "LEU", "UEC", "CCJ", "DNN", "URG",
 ]
 
@@ -43,9 +49,22 @@ def _is_valid_ticker(ticker: str) -> bool:
     return bool(re.match(r"^[A-Z]{1,5}([.\-][A-Z]{1,2})?$", ticker))
 
 
+def _fetch_html(url: str) -> str:
+    """Fetch HTML using requests with SSL cert handling."""
+    headers = {"User-Agent": "Mozilla/5.0 (compatible; KATScreener/1.0)"}
+    resp = requests.get(url, headers=headers, timeout=15, verify=_SSL_VERIFY)
+    resp.raise_for_status()
+    return resp.text
+
+
+def _read_html_tables(url: str) -> list[pd.DataFrame]:
+    html = _fetch_html(url)
+    return pd.read_html(StringIO(html), header=0)
+
+
 def fetch_sp500_tickers() -> list[str]:
     try:
-        tables = pd.read_html(SP500_URL, header=0)
+        tables = _read_html_tables(SP500_URL)
         df = tables[0]
         col = next(
             (c for c in df.columns if "symbol" in c.lower() or "ticker" in c.lower()),
@@ -63,8 +82,7 @@ def fetch_sp500_tickers() -> list[str]:
 
 def fetch_nasdaq100_tickers() -> list[str]:
     try:
-        tables = pd.read_html(NASDAQ100_URL, header=0)
-        # Find the table with ticker/symbol column
+        tables = _read_html_tables(NASDAQ100_URL)
         for df in tables:
             cols_lower = [c.lower() for c in df.columns]
             if any("ticker" in c or "symbol" in c for c in cols_lower):
@@ -88,12 +106,9 @@ def fetch_nasdaq100_tickers() -> list[str]:
 
 
 def fetch_small_cap_tickers() -> list[str]:
-    """
-    Try to get a small-cap list. Falls back to a curated list if scraping fails.
-    """
+    """Try Russell 2000 Wikipedia page; fall back to curated list."""
     try:
-        # Try fetching Russell 2000 components from Wikipedia
-        tables = pd.read_html(RUSSELL2000_URL, header=0)
+        tables = _read_html_tables(RUSSELL2000_URL)
         for df in tables:
             cols_lower = [c.lower() for c in df.columns]
             if any("ticker" in c or "symbol" in c for c in cols_lower):
