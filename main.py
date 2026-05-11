@@ -89,7 +89,7 @@ Examples:
     parser.add_argument("--exclude-etfs", action="store_true", default=None)
     parser.add_argument("--exclude-low-priced", action="store_true", default=None)
     parser.add_argument("--verbose", action="store_true", default=False,
-                        help="Print every ticker as it is fetched with price and % change")
+                        help="Print every ticker as it is fetched with price and %% change")
 
     return parser.parse_args()
 
