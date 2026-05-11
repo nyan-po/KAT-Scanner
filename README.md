@@ -1,0 +1,513 @@
+# KAT-Scanner
+
+Prompt:
+
+Build a Python project called KAT Market Screener.
+
+Purpose:
+Create a rules-based market-wide stock screener that discovers stocks across the market and ranks them using the KAT grading model.
+
+This is very important:
+The screener should be MARKET SCAN FIRST.
+
+The main goal is not just to analyze tickers the user already knows.
+The main goal is to search the market, discover new potential movers, grade them, and surface the best short-term and long-term opportunities.
+
+The screener should support watchlists and manual tickers, but market-wide discovery must be the default behavior.
+
+Important:
+Build an MVP first. Prioritize clean structure, working code, tests, realistic missing-data handling, and usable terminal output. Do not overbuild.
+
+Tech stack:
+- Python 3.11+
+- yfinance for free market/fundamental data
+- pandas for data handling
+- numpy if needed
+- requests if needed
+- beautifulsoup4 if needed for public ticker lists
+- rich or tabulate for terminal output
+- pyyaml for config
+- python-dotenv for environment variables
+- pytest for tests
+
+Project structure:
+main.py
+config.yaml
+requirements.txt
+.env.example
+README.md
+/src
+  config.py
+  universe.py
+  data.py
+  fundamentals.py
+  technicals.py
+  news.py
+  scoring.py
+  grading.py
+  filters.py
+  output.py
+/tests
+  test_universe.py
+  test_scoring.py
+  test_grading.py
+  test_filters.py
+  test_missing_data.py
+
+Core scan types:
+1. market
+2. watchlist
+3. manual
+4. csv
+
+Core analysis modes:
+1. short_term
+2. long_term
+
+Default behavior:
+If the user runs:
+python main.py
+
+It should default to:
+python main.py --scan market --mode short_term
+
+CLI examples:
+python main.py
+python main.py --scan market --mode short_term
+python main.py --scan market --mode long_term
+python main.py --scan watchlist --mode short_term
+python main.py --ticker APLD --mode long_term
+python main.py --csv tickers.csv --mode short_term
+python main.py --scan market --mode short_term --min-grade A-
+python main.py --scan market --mode long_term --min-market-cap 500000000
+
+Market-wide universe requirements:
+Create a stock universe builder.
+
+For MVP, support these universe sources:
+- S&P 500 tickers from a free/public source
+- Nasdaq 100 tickers from a free/public source
+- Russell 2000 or small-cap list if a free source is available
+- Optional custom universe CSV
+- Config watchlist as an optional supplement
+
+The screener should be able to scan:
+- large caps
+- mid caps
+- small caps
+- low-priced stocks
+- high-volume movers
+- upcoming earnings names
+- sector leaders
+- speculative growth names
+
+Universe behavior:
+- Market scan should gather a broad ticker universe automatically.
+- Deduplicate tickers.
+- Clean ticker symbols for yfinance compatibility.
+- If a public source fails, continue with the remaining sources.
+- If all public sources fail, fall back to the config watchlist and show a warning.
+- The user should not need to manually enter tickers for market_scan mode.
+
+Config.yaml should include:
+universe:
+  include_sp500: true
+  include_nasdaq100: true
+  include_small_caps: true
+  include_watchlist: true
+  custom_csv: null
+  max_tickers_per_scan: 500
+
+default_scan:
+  scan: market
+  mode: short_term
+
+watchlist:
+  - APLD
+  - SOUN
+  - MU
+  - NVDA
+  - AMD
+  - SMR
+  - PLTR
+  - IOT
+  - CRWD
+  - PANW
+  - ARM
+  - QQQ
+  - TSLA
+  - META
+  - AMZN
+  - GOOGL
+  - MSFT
+
+filters:
+  min_price: 1
+  max_price: null
+  min_market_cap: 50000000
+  min_avg_volume: 500000
+  min_relative_volume: 1.2
+  min_revenue_growth: null
+  max_pe: null
+  earnings_within_days: null
+  min_grade: B
+
+sector_mappings:
+  AI Infrastructure:
+    - NVDA
+    - AMD
+    - APLD
+    - SMR
+    - VRT
+    - ETN
+  Semiconductors:
+    - NVDA
+    - AMD
+    - MU
+    - ARM
+    - AVGO
+    - QCOM
+  Software:
+    - MSFT
+    - NOW
+    - CRM
+    - ADBE
+    - PLTR
+  Cybersecurity:
+    - CRWD
+    - PANW
+    - ZS
+    - NET
+  Nuclear and Power:
+    - SMR
+    - CCJ
+    - LEU
+    - UEC
+    - CEG
+    - VST
+  Defense:
+    - LMT
+    - RTX
+    - NOC
+    - GD
+    - KTOS
+  Consumer/EV:
+    - TSLA
+    - AMZN
+  Index:
+    - QQQ
+    - SPY
+
+Data to collect when available:
+- ticker
+- company name
+- sector
+- industry
+- current price
+- market cap
+- float if available
+- volume
+- average volume
+- relative volume
+- daily percent change
+- 5-day percent change
+- 1-month percent change
+- 52-week high
+- 52-week low
+- distance from 52-week high
+- revenue growth
+- earnings growth
+- EPS
+- PE ratio
+- forward PE
+- price/sales ratio
+- gross margin
+- operating margin
+- free cash flow
+- total cash
+- total debt
+- debt-to-cash ratio
+- short interest if available
+- next earnings date if available
+- recent news headlines if available
+
+Missing data rule:
+If data is unavailable:
+- Do not crash.
+- Mark the field as "N/A".
+- Reduce confidence.
+- Explain that the score may be less reliable.
+- Do not automatically punish high-growth companies too harshly if PE is missing because they are not profitable yet.
+- But do penalize companies with missing data, weak liquidity, bad balance sheet, or obvious dilution risk when evidence is available.
+
+KAT grade conversion:
+A+ = 90-100
+A = 85-89
+A- = 80-84
+B+ = 75-79
+B = 70-74
+B- = 65-69
+C = 55-64
+D = below 55
+
+Short-term scoring purpose:
+Find stocks that could move today, this week, or around near-term catalysts.
+
+Short-term scoring weights:
+- Catalyst/news quality: 20
+- Relative volume/liquidity: 20
+- Technical setup: 20
+- Earnings/catalyst timing: 15
+- Sector strength: 10
+- Short interest/squeeze potential: 5
+- Options liquidity placeholder: 5
+- Risk/fundamental penalty: 5
+
+Short-term discovery ranking should prioritize:
+- unusual volume
+- relative volume
+- daily percent change
+- gap up or gap down
+- recent strong momentum
+- upcoming earnings
+- fresh news catalyst
+- technical breakout
+- technical reversal setup
+- liquidity
+- short interest if available
+- sector momentum
+
+Short-term setup types:
+- momentum runner
+- earnings mover
+- gap-up continuation
+- gap-down reversal
+- VWAP reclaim candidate
+- breakout candidate
+- squeeze watch
+- sector sympathy play
+- risk-off hedge
+- avoid/no trade
+
+Long-term scoring purpose:
+Find companies that could become quality compounders, sector leaders, or strong swing/position trades.
+
+Long-term scoring weights:
+- Revenue growth: 20
+- Earnings trend/margin improvement: 15
+- Balance sheet strength: 15
+- Free cash flow trend: 15
+- Valuation reasonableness: 10
+- Sector tailwind: 10
+- Execution proxy from guidance/news: 10
+- Dilution/risk penalty: 5
+
+Long-term discovery ranking should prioritize:
+- revenue growth
+- earnings improvement
+- margin improvement
+- valuation reasonableness
+- strong balance sheet
+- free cash flow trend
+- sector tailwind
+- institutional-quality liquidity
+- relative strength
+- companies near major growth themes
+
+Long-term setup types:
+- growth compounder
+- AI infrastructure leader
+- software compounder
+- semiconductor leader
+- nuclear/power infrastructure play
+- turnaround candidate
+- speculative growth
+- overvalued/watch only
+- avoid/no trade
+
+KAT output for each ticker:
+- ticker
+- company name
+- sector
+- industry
+- current price
+- KAT score
+- KAT grade
+- mode
+- setup type
+- strongest reason
+- biggest risk
+- catalyst summary
+- volume signal
+- valuation signal
+- technical signal
+- fundamental signal
+- suggested action:
+  - buy zone
+  - wait
+  - watchlist
+  - avoid
+- invalidation condition
+- confidence level
+
+Suggested action rules:
+- A+ or A with strong technical confirmation: buy zone or high-priority watch
+- A-: good setup, wait for clean entry if extended
+- B+: tradable but needs confirmation
+- B: watchlist only
+- B-: speculative, small size only if chart confirms
+- C or D: avoid
+
+The screener must not blindly favor cheap stocks.
+The screener must not blindly favor stocks that are already up huge.
+The screener should look for quality + catalyst + volume + chart + risk/reward.
+
+Filtering:
+Allow these filters from config and CLI:
+- minimum price
+- maximum price
+- minimum relative volume
+- minimum average volume
+- minimum market cap
+- maximum PE
+- minimum revenue growth
+- upcoming earnings within X days
+- only positive revenue growth
+- minimum KAT grade
+- max number of results
+- include/exclude ETFs
+- include/exclude low-priced stocks
+
+Output:
+- Print a terminal table sorted by KAT score.
+- Save screener_results.csv.
+- Save screener_results.json.
+- Include timestamp of scan.
+- Include scan type.
+- Include analysis mode.
+- Include number of tickers scanned.
+- Include number of tickers passing filters.
+
+Terminal table columns:
+- Rank
+- Ticker
+- Company
+- Price
+- % Change
+- Rel Volume
+- Market Cap
+- KAT Score
+- Grade
+- Setup Type
+- Action
+- Confidence
+- Strongest Reason
+- Biggest Risk
+
+CSV/JSON should include all available fields.
+
+Confidence score:
+Add a confidence level:
+- High
+- Medium
+- Low
+
+Confidence should depend on:
+- amount of available data
+- liquidity
+- consistency between fundamentals, technicals, and catalyst
+- whether news/catalyst is confirmed
+- whether the ticker has enough volume
+
+News:
+For MVP, news can be simple.
+Use yfinance news if available.
+Do not require paid news APIs.
+If news is unavailable, use "No recent news found" and score catalyst conservatively.
+Do not fabricate catalysts.
+
+Technicals:
+Use recent price history from yfinance.
+Calculate:
+- 9 EMA
+- 20 EMA
+- 50 SMA
+- 200 SMA if enough data
+- 5-day return
+- 20-day return
+- distance from 52-week high
+- whether price is above 9 EMA
+- whether price is above 20 EMA
+- whether price is above 50 SMA
+- whether the stock is extended
+- simple breakout/reversal notes
+
+Technical setup examples:
+- Bullish: price above 9 EMA and 20 EMA with rising volume
+- Bullish but extended: price far above 9 EMA after large move
+- Bearish: price below 20 EMA and weak relative volume
+- Reversal watch: large drop but volume stabilizing and price reclaiming short EMA
+- Avoid: illiquid, wide range, no clear setup
+
+Fundamentals:
+Use yfinance info and financial fields where available.
+Do not crash if fields are missing.
+
+Risk penalties:
+Penalize:
+- extremely low liquidity
+- very low market cap
+- negative revenue growth
+- heavy debt compared to cash
+- very high valuation without growth
+- weak technical trend
+- no catalyst
+- missing data
+- extreme one-day move that is already overextended
+- dilution risk if share count data suggests major dilution or if news indicates offerings
+
+Market scan performance:
+Because market-wide scans can be slow:
+- Use max_tickers_per_scan in config.
+- Fetch data efficiently.
+- Continue scanning even if some tickers fail.
+- Print progress updates in the terminal.
+- Summarize failures at the end.
+
+Tests:
+Add pytest tests for:
+- universe builder
+- KAT score calculation
+- grade conversion
+- filter logic
+- missing data handling
+- short_term vs long_term scoring differences
+- confidence score calculation
+- no crash on failed ticker fetch
+
+README:
+Include:
+- project overview
+- setup instructions
+- how to install requirements
+- how to run market scan
+- how to run watchlist scan
+- how to analyze one ticker
+- how to scan a CSV
+- how to adjust scoring weights
+- how to adjust filters
+- limitations of yfinance/free data
+- explanation of KAT grades
+- disclaimer that this is not financial advice
+
+.env.example:
+Include placeholders only.
+Do not include real API keys.
+No paid API should be required for MVP.
+
+After building:
+- run tests
+- show the file tree
+- show example CLI commands
+- show one example market scan output table
+- explain known limitations
