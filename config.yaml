@@ -38,7 +38,7 @@ filters:
   min_revenue_growth: null
   max_pe: null
   earnings_within_days: null
-  min_grade: C
+  min_grade: null
   exclude_etfs: false
   exclude_low_priced: false
   max_results: 50

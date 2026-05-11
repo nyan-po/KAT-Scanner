@@ -88,6 +88,8 @@ Examples:
     parser.add_argument("--max-results", type=int, default=None)
     parser.add_argument("--exclude-etfs", action="store_true", default=None)
     parser.add_argument("--exclude-low-priced", action="store_true", default=None)
+    parser.add_argument("--verbose", action="store_true", default=False,
+                        help="Print every ticker as it is fetched with price and % change")
 
     return parser.parse_args()
 
@@ -140,12 +142,12 @@ def get_kat_sector(ticker: str, sector_mappings: dict) -> str | None:
 
 
 def run_screener(tickers: list[str], mode: str, scan_type: str, cfg: dict,
-                 filter_overrides: dict) -> list[dict]:
+                 filter_overrides: dict, verbose: bool = False) -> list[dict]:
     sector_mappings = get_sector_mappings(cfg)
     filters = get_filters(cfg, filter_overrides)
 
     print(f"\n  Fetching data for {len(tickers)} tickers...", flush=True)
-    raw_data = fetch_batch(tickers, show_progress=True)
+    raw_data = fetch_batch(tickers, show_progress=not verbose, verbose=verbose)
 
     total_scanned = len(tickers)
     failed = [t for t in tickers if t not in raw_data]
@@ -241,7 +243,7 @@ def main():
     if args.exclude_low_priced:
         filter_overrides["exclude_low_priced"] = True
 
-    run_screener(tickers, mode, scan_type, cfg, filter_overrides)
+    run_screener(tickers, mode, scan_type, cfg, filter_overrides, verbose=args.verbose)
 
 
 if __name__ == "__main__":

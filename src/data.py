@@ -187,24 +187,36 @@ def fetch_ticker_data(ticker: str, retries: int = 2) -> dict | None:
     return None
 
 
-def fetch_batch(tickers: list[str], show_progress: bool = True) -> dict[str, dict]:
+def fetch_batch(tickers: list[str], show_progress: bool = True,
+                verbose: bool = False) -> dict[str, dict]:
     """
     Fetch data for a list of tickers, returning a dict keyed by ticker.
     Failed tickers are skipped and counted.
+    verbose=True prints every ticker as it is fetched.
     """
     results = {}
     failed = []
     total = len(tickers)
 
     for i, ticker in enumerate(tickers, 1):
-        if show_progress and (i % 25 == 0 or i == 1 or i == total):
+        if verbose:
+            status = f"  [{i}/{total}] Fetching {ticker:<8}"
+            print(status, end="\r", flush=True)
+        elif show_progress and (i % 25 == 0 or i == 1 or i == total):
             print(f"  [Progress] Scanning {i}/{total} tickers...", flush=True)
 
         data = fetch_ticker_data(ticker)
         if data:
             results[ticker] = data
+            if verbose:
+                price = data.get("price") or 0
+                chg = data.get("day_change_pct")
+                chg_str = f"{chg:+.1f}%" if chg is not None else "  N/A "
+                print(f"  [{i}/{total}] {ticker:<8} ${price:<8.2f} {chg_str}", flush=True)
         else:
             failed.append(ticker)
+            if verbose:
+                print(f"  [{i}/{total}] {ticker:<8} FAILED", flush=True)
 
         # Small delay to be polite to yfinance / avoid rate-limiting
         time.sleep(0.05)
