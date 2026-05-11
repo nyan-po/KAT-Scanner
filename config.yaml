@@ -1,0 +1,116 @@
+universe:
+  include_sp500: true
+  include_nasdaq100: true
+  include_small_caps: true
+  include_watchlist: true
+  custom_csv: null
+  max_tickers_per_scan: 500
+
+default_scan:
+  scan: market
+  mode: short_term
+
+watchlist:
+  - APLD
+  - SOUN
+  - MU
+  - NVDA
+  - AMD
+  - SMR
+  - PLTR
+  - IOT
+  - CRWD
+  - PANW
+  - ARM
+  - QQQ
+  - TSLA
+  - META
+  - AMZN
+  - GOOGL
+  - MSFT
+
+filters:
+  min_price: 1
+  max_price: null
+  min_market_cap: 50000000
+  min_avg_volume: 500000
+  min_relative_volume: 1.2
+  min_revenue_growth: null
+  max_pe: null
+  earnings_within_days: null
+  min_grade: B
+  exclude_etfs: false
+  exclude_low_priced: false
+  max_results: 50
+
+scoring:
+  short_term:
+    catalyst_news: 20
+    relative_volume: 20
+    technical_setup: 20
+    earnings_timing: 15
+    sector_strength: 10
+    short_interest: 5
+    options_liquidity: 5
+    risk_penalty: 5
+  long_term:
+    revenue_growth: 20
+    earnings_trend: 15
+    balance_sheet: 15
+    fcf_trend: 15
+    valuation: 10
+    sector_tailwind: 10
+    execution_proxy: 10
+    dilution_risk: 5
+
+sector_mappings:
+  AI Infrastructure:
+    - NVDA
+    - AMD
+    - APLD
+    - SMR
+    - VRT
+    - ETN
+  Semiconductors:
+    - NVDA
+    - AMD
+    - MU
+    - ARM
+    - AVGO
+    - QCOM
+  Software:
+    - MSFT
+    - NOW
+    - CRM
+    - ADBE
+    - PLTR
+  Cybersecurity:
+    - CRWD
+    - PANW
+    - ZS
+    - NET
+  Nuclear and Power:
+    - SMR
+    - CCJ
+    - LEU
+    - UEC
+    - CEG
+    - VST
+  Defense:
+    - LMT
+    - RTX
+    - NOC
+    - GD
+    - KTOS
+  Consumer/EV:
+    - TSLA
+    - AMZN
+  Index:
+    - QQQ
+    - SPY
+
+output:
+  save_csv: true
+  save_json: true
+  csv_path: screener_results.csv
+  json_path: screener_results.json
