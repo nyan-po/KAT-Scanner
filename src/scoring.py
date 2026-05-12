@@ -40,19 +40,21 @@ def _sector_tailwind_score(sector: str, industry: str, kat_sector: str | None) -
 def _volume_score(rel_volume: float | None, avg_volume: float | None) -> int:
     """Score relative volume contribution (max 20)."""
     if rel_volume is None:
-        return 5
+        return 8  # unknown — give benefit of the doubt
 
     if rel_volume >= 5.0:
         score = 20
     elif rel_volume >= 3.0:
-        score = 17
+        score = 18
     elif rel_volume >= 2.0:
-        score = 14
+        score = 15
     elif rel_volume >= 1.5:
-        score = 11
+        score = 13
     elif rel_volume >= 1.2:
-        score = 8
+        score = 11
     elif rel_volume >= 0.8:
+        score = 8
+    elif rel_volume >= 0.5:
         score = 5
     else:
         score = 2
@@ -81,18 +83,18 @@ def _technical_score(tech: dict) -> int:
     """Convert technical signal to score (max 20)."""
     signal = tech.get("tech_signal", "")
     if signal == "bullish with volume":
-        return 18
+        return 20
     elif signal == "bullish":
-        return 14
+        return 16
     elif signal == "bullish but extended":
-        return 9  # good underlying trend but risky entry
+        return 11  # good underlying trend but risky entry
     elif signal == "reversal watch":
-        return 10
+        return 12
     elif signal == "neutral":
-        return 7
+        return 10
     elif signal == "bearish":
-        return 3
-    return 5  # insufficient data — don't punish hard
+        return 4
+    return 8  # insufficient data — don't punish hard
 
 
 def _risk_penalty(data: dict, tech: dict, fund: dict) -> int:
@@ -177,9 +179,12 @@ def score_short_term(data: dict, kat_sector: str | None = None) -> dict:
         - risk_pen
     )
 
-    # Normalize to 0-100
-    max_possible = 20 + 20 + 20 + 15 + 10 + 5 + 5
-    total = max(0, min(100, round(raw / max_possible * 100)))
+    # Normalize to 0-100.
+    # Use a realistic "excellent setup" ceiling (~68) rather than the theoretical
+    # max (95), so good-but-not-perfect setups land in the B/A range instead of
+    # all compressing into D.
+    ceiling = 68
+    total = max(0, min(100, round(raw / ceiling * 100)))
 
     volume_signal = _build_volume_signal(data)
     setup_type = _short_term_setup_type(data, tech, news)
@@ -342,7 +347,7 @@ def score_long_term(data: dict, kat_sector: str | None = None) -> dict:
     )
 
     # Execution proxy: news quality + management signals (max 10)
-    exec_score = min(10, max(0, news.get("catalyst_score", 5) // 2))
+    exec_score = min(10, max(4, news.get("catalyst_score", 5) // 2 + 2))
 
     # Dilution risk penalty (max 5 — subtracted)
     dilution_pen = 5 if news.get("dilution_flag") else 0
@@ -360,8 +365,9 @@ def score_long_term(data: dict, kat_sector: str | None = None) -> dict:
         - dilution_pen
     )
 
-    max_possible = 20 + 15 + 15 + 15 + 10 + 10 + 10
-    total = max(0, min(100, round(raw / max_possible * 100)))
+    # Normalize against realistic excellent ceiling (~72), not theoretical max (95)
+    ceiling = 72
+    total = max(0, min(100, round(raw / ceiling * 100)))
 
     volume_signal = _build_volume_signal(data)
     setup_type = _long_term_setup_type(data, tech, fund)

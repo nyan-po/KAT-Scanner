@@ -73,15 +73,15 @@ class TestVolumeScore:
 
     def test_moderate_rel_vol(self):
         score = _volume_score(2.0, 1_000_000)
-        assert score == 14
+        assert score == 15
 
     def test_low_rel_vol(self):
         score = _volume_score(0.5, 1_000_000)
-        assert score == 2
+        assert score == 5
 
     def test_none_rel_vol(self):
         score = _volume_score(None, 1_000_000)
-        assert score == 5
+        assert score == 8
 
     def test_thin_market_penalty(self):
         score_thin = _volume_score(3.0, 50_000)
@@ -160,8 +160,15 @@ class TestLongTermScoring:
         assert 0 <= result["kat_score"] <= 100
 
     def test_high_revenue_growth_scores_better(self):
-        low_growth = _make_good_ticker_data(revenue_growth=5.0)
-        high_growth = _make_good_ticker_data(revenue_growth=50.0)
+        # Use minimal other data so we're not hitting the 100 ceiling
+        low_growth = _make_good_ticker_data(
+            revenue_growth=2.0, earnings_growth=None, free_cash_flow=None,
+            total_cash=None, total_debt=None, debt_to_cash=None,
+        )
+        high_growth = _make_good_ticker_data(
+            revenue_growth=45.0, earnings_growth=None, free_cash_flow=None,
+            total_cash=None, total_debt=None, debt_to_cash=None,
+        )
         assert score_long_term(high_growth)["kat_score"] > score_long_term(low_growth)["kat_score"]
 
     def test_negative_revenue_growth_penalized(self):
