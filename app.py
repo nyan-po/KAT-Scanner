@@ -40,6 +40,7 @@ from src.alerts import (
     CONDITION_LABELS,
 )
 from src.discord_notify import send_batch
+from src.scenario_gen import generate_scenarios
 
 try:
     from streamlit_autorefresh import st_autorefresh
@@ -138,6 +139,7 @@ for key, default in [
     ("wl_selected_idx", None),
     ("wl_alerts", load_alerts()),
     ("wl_webhook_url", load_webhook_url()),
+    ("wl_scenarios", {}),   # {ticker: [scenario, ...]}
 ]:
     if key not in st.session_state:
         st.session_state[key] = default
@@ -779,6 +781,72 @@ if view == "📋 Live Watchlist":
                 st.divider()
                 st.markdown(f"### 🔍 Detail — {_sel}")
                 _render_detail(_qa)
+
+                # ── Scenario generator ─────────────────────────────────────
+                st.divider()
+                st.markdown("### 🎯 Scenario Generator")
+
+                _sc_col1, _sc_col2 = st.columns([2, 5])
+                with _sc_col1:
+                    if st.button("⚡ Generate Scenarios", use_container_width=True, type="primary"):
+                        st.session_state.wl_scenarios[_sel] = generate_scenarios(_qa)
+
+                _scens = st.session_state.wl_scenarios.get(_sel, [])
+
+                if not _scens:
+                    st.caption("Click **⚡ Generate Scenarios** to get data-driven setups for this ticker.")
+                else:
+                    _prio_color = {"high": "#ef5350", "medium": "#f9a825", "low": "#78909c"}
+                    for _si, _sc in enumerate(_scens):
+                        _pg      = _sc.get("projected_grade", "")
+                        _pg_bg   = GRADE_BG.get(_pg, "#555")
+                        _prio    = _sc.get("priority", "medium")
+                        _pc      = _prio_color.get(_prio, "#aaa")
+                        _cond_lbl = CONDITION_LABELS.get(_sc["condition"], _sc["condition"])
+
+                        with st.container(border=True):
+                            _sl1, _sl2, _sl3 = st.columns([4, 2, 1])
+                            with _sl1:
+                                st.markdown(
+                                    f'<span style="font-weight:700;font-size:1rem">'
+                                    f'{_sc["level_name"]}</span>'
+                                    f'&nbsp;&nbsp;<span style="color:{_pc};font-size:0.8rem">'
+                                    f'● {_prio}</span>',
+                                    unsafe_allow_html=True,
+                                )
+                                st.caption(_sc["description"])
+                                st.markdown(
+                                    f'<span style="color:#aaa;font-size:0.82rem">'
+                                    f'{_sc["reasoning"]}</span>',
+                                    unsafe_allow_html=True,
+                                )
+                            with _sl2:
+                                st.markdown(
+                                    f'**Trigger:** `{_cond_lbl}{_sc["threshold"]}`',
+                                )
+                                if _pg:
+                                    st.markdown(
+                                        f'<span style="background:{_pg_bg};color:white;'
+                                        f'padding:2px 10px;border-radius:4px;font-weight:900;'
+                                        f'font-size:1rem">{_pg}</span> projected',
+                                        unsafe_allow_html=True,
+                                    )
+                            with _sl3:
+                                if st.button(
+                                    "＋ Add",
+                                    key=f"addsc_{_sel}_{_si}",
+                                    use_container_width=True,
+                                    help="Add to Scenario Alerts",
+                                ):
+                                    st.session_state.wl_alerts = add_alert(
+                                        _sel,
+                                        _sc["condition"],
+                                        _sc["threshold"],
+                                        description=_sc["description"],
+                                        projected_grade=_pg,
+                                    )
+                                    st.toast(f"Alert added: {_sel} — {_sc['level_name']}", icon="✅")
+
             elif _qq:
                 st.divider()
                 _qp  = _qq.get("price")
@@ -796,9 +864,9 @@ if view == "📋 Live Watchlist":
                 _m2.metric("% Chg",   fmt_pct(_qc))
                 _m3.metric("Rel Vol", f"{_qq['rel_volume']:.1f}x" if _qq.get("rel_volume") else "—")
                 _m4.metric("Volume",  f"{int(_qq['volume']):,}" if _qq.get("volume") else "—")
-                st.caption("Click 📊 Run KAT Analysis for full scoring and setup detail.")
+                st.caption("Click 📊 Run KAT Analysis for full scoring and scenario generation.")
     else:
-        st.caption("👆 Click any row to see ticker detail.")
+        st.caption("👆 Click any row to see detail and generate scenarios.")
 
     # ── Scenario alerts panel ──────────────────────────────────────────────────
     _all_alerts = st.session_state.wl_alerts
