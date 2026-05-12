@@ -23,7 +23,7 @@ def _fmt_threshold(condition: str, threshold: float) -> str:
     return f"{threshold:.1f}x"
 
 
-def send_alert(webhook_url: str, alert: dict) -> bool:
+def send_alert(webhook_url: str, alert: dict, ping_id: str = "") -> bool:
     """POST an embed to the Discord webhook. Returns True on success."""
     if not webhook_url:
         return False
@@ -41,7 +41,7 @@ def send_alert(webhook_url: str, alert: dict) -> bool:
 
     emoji, verb, color = _CONDITION_META.get(cond, ("🔔", "triggered", 0x607D8B))
     thresh_str = _fmt_threshold(cond, thresh)
-    price_str  = f"${price:.2f}"  if price   is not None else "N/A"
+    price_str  = f"${price:.2f}"    if price   is not None else "N/A"
     chg_str    = f"{day_chg:+.1f}%" if day_chg is not None else "N/A"
     rvol_str   = f"{rel_vol:.1f}x"  if rel_vol is not None else "N/A"
 
@@ -60,10 +60,13 @@ def send_alert(webhook_url: str, alert: dict) -> bool:
         "timestamp":   alert.get("triggered_at"),
     }
 
+    # content field is the only place Discord resolves mentions
+    content = f"<@{ping_id}>" if ping_id.strip() else ""
+
     try:
         resp = requests.post(
             webhook_url,
-            json={"embeds": [embed]},
+            json={"content": content, "embeds": [embed]},
             timeout=10,
         )
         resp.raise_for_status()
@@ -73,9 +76,9 @@ def send_alert(webhook_url: str, alert: dict) -> bool:
         return False
 
 
-def send_batch(webhook_url: str, triggered_alerts: list[dict]) -> int:
+def send_batch(webhook_url: str, triggered_alerts: list[dict], ping_id: str = "") -> int:
     """Send all triggered alerts; returns count of successful sends."""
-    return sum(send_alert(webhook_url, a) for a in triggered_alerts)
+    return sum(send_alert(webhook_url, a, ping_id=ping_id) for a in triggered_alerts)
 
 
 def send_test(webhook_url: str) -> tuple[bool, str]:

@@ -43,6 +43,16 @@ def load_webhook_url() -> str:
     return _load_raw().get("webhook_url", "")
 
 
+def load_ping_id() -> str:
+    return _load_raw().get("ping_id", "")
+
+
+def save_ping_id(ping_id: str):
+    data = _load_raw()
+    data["ping_id"] = ping_id.strip()
+    _save_raw(data)
+
+
 def save_webhook_url(url: str):
     data = _load_raw()
     data["webhook_url"] = url.strip()

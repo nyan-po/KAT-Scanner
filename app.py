@@ -36,6 +36,7 @@ from src.watchlist import (
 from src.live_data import fetch_live_quotes
 from src.alerts import (
     load_alerts, load_webhook_url, save_webhook_url,
+    load_ping_id, save_ping_id,
     add_alert, remove_alert, reset_alert, check_alerts,
     CONDITION_LABELS,
 )
@@ -139,6 +140,7 @@ for key, default in [
     ("wl_selected_idx", None),
     ("wl_alerts", load_alerts()),
     ("wl_webhook_url", load_webhook_url()),
+    ("wl_ping_id", load_ping_id()),
     ("wl_scenarios", {}),   # {ticker: [scenario, ...]} — shared across both views
 ]:
     if key not in st.session_state:
@@ -342,11 +344,19 @@ if view == "🔔 Alerts":
             placeholder="https://discord.com/api/webhooks/...",
             label_visibility="collapsed",
         )
+        _ping_input = st.text_input(
+            "Your Discord User ID (to ping on alerts)",
+            value=st.session_state.wl_ping_id,
+            placeholder="e.g. 123456789012345678",
+            help="Enable Developer Mode in Discord → right-click your name → Copy User ID",
+        )
         _wh_c1, _wh_c2 = st.columns(2)
         if _wh_c1.button("💾 Save", use_container_width=True):
             save_webhook_url(_wh_input)
+            save_ping_id(_ping_input)
             st.session_state.wl_webhook_url = _wh_input
-            st.toast("Webhook saved!", icon="✅")
+            st.session_state.wl_ping_id = _ping_input
+            st.toast("Saved!", icon="✅")
         if _wh_c2.button("📨 Test", use_container_width=True):
             _ok, _msg = send_test(st.session_state.wl_webhook_url or _wh_input)
             if _ok:
@@ -354,7 +364,8 @@ if view == "🔔 Alerts":
             else:
                 st.error(f"Failed: {_msg}")
         st.caption(
-            "Server Settings → Integrations → Webhooks → New Webhook → Copy URL"
+            "Webhook: Server Settings → Integrations → Webhooks → New Webhook → Copy URL  \n"
+            "User ID: Discord → Settings → Advanced → enable Developer Mode → right-click your name → Copy User ID"
         )
 
     st.divider()
@@ -404,7 +415,7 @@ if view == "🔔 Alerts":
                             "triggered_at": datetime.now().isoformat(timespec="seconds"),
                             "quote": st.session_state.wl_quotes.get(_al["ticker"], {}),
                         }
-                        _ok = send_alert(st.session_state.wl_webhook_url, _test_alert)
+                        _ok = send_alert(st.session_state.wl_webhook_url, _test_alert, ping_id=st.session_state.wl_ping_id)
                         if _ok:
                             st.toast(f"Test fired for {_al['ticker']} — check Discord", icon="📨")
                         else:
@@ -820,7 +831,7 @@ if view == "📋 Live Watchlist":
             _fired = check_alerts(st.session_state.wl_quotes)
             st.session_state.wl_alerts = load_alerts()
             if _fired:
-                _sent = send_batch(st.session_state.wl_webhook_url, _fired)
+                _sent = send_batch(st.session_state.wl_webhook_url, _fired, ping_id=st.session_state.wl_ping_id)
                 for _f in _fired:
                     _emoji = "✅" if _sent else "🔔"
                     st.toast(
