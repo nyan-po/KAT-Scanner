@@ -34,6 +34,12 @@ from src.watchlist import (
     save_daily_snapshot, load_latest_snapshot,
 )
 from src.live_data import fetch_live_quotes
+from src.alerts import (
+    load_alerts, load_webhook_url, save_webhook_url,
+    add_alert, remove_alert, reset_alert, check_alerts,
+    CONDITION_LABELS,
+)
+from src.discord_notify import send_batch
 
 try:
     from streamlit_autorefresh import st_autorefresh
@@ -130,6 +136,8 @@ for key, default in [
     ("wl_last_quote_update", None),
     ("wl_last_analysis_update", None),
     ("wl_selected_idx", None),
+    ("wl_alerts", load_alerts()),
+    ("wl_webhook_url", load_webhook_url()),
 ]:
     if key not in st.session_state:
         st.session_state[key] = default
@@ -280,6 +288,75 @@ else:  # view == "📋 Live Watchlist"
             "Intraday (1-min bars)", value=True,
             help="Disable for faster daily-close data",
         )
+
+        st.divider()
+        st.markdown("### 🔔 Scenario Alerts")
+
+        # Discord webhook URL
+        with st.expander("Discord webhook", expanded=not st.session_state.wl_webhook_url):
+            _wh_input = st.text_input(
+                "Webhook URL",
+                value=st.session_state.wl_webhook_url,
+                type="password",
+                placeholder="https://discord.com/api/webhooks/...",
+                label_visibility="collapsed",
+            )
+            if st.button("💾 Save webhook", use_container_width=True):
+                save_webhook_url(_wh_input)
+                st.session_state.wl_webhook_url = _wh_input
+                st.success("Saved!")
+
+        # Add alert form
+        with st.expander("➕ Add scenario", expanded=False):
+            _al_ticker = st.selectbox(
+                "Ticker", st.session_state.wl_tickers or ["—"],
+                key="al_ticker",
+            )
+            _al_cond = st.selectbox(
+                "Condition",
+                list(CONDITION_LABELS.keys()),
+                format_func=lambda x: CONDITION_LABELS[x],
+                key="al_cond",
+            )
+            _al_thresh = st.number_input(
+                "Threshold", min_value=0.0, step=0.5, key="al_thresh",
+                help="Price: dollars | Day chg: percent | RelVol: multiplier",
+            )
+            _al_desc = st.text_input(
+                "Note (optional)", placeholder="e.g. dip + reclaim setup",
+                key="al_desc",
+            )
+            _al_grade = st.selectbox(
+                "Projected grade if triggered",
+                ["", "A+", "A", "A-", "B+", "B", "B-", "C"],
+                format_func=lambda x: "— none —" if x == "" else x,
+                key="al_grade",
+            )
+            if st.button("Add alert", use_container_width=True, type="primary"):
+                if st.session_state.wl_tickers:
+                    st.session_state.wl_alerts = add_alert(
+                        _al_ticker, _al_cond, _al_thresh,
+                        description=_al_desc,
+                        projected_grade=_al_grade,
+                    )
+                    st.rerun()
+
+        # Active alerts list
+        _active = [a for a in st.session_state.wl_alerts if a.get("active")]
+        if _active:
+            for _al in _active:
+                _status = "✅" if _al.get("triggered") else "⏳"
+                _lbl    = CONDITION_LABELS.get(_al["condition"], _al["condition"])
+                st.caption(f"{_status} **{_al['ticker']}** — {_lbl}{_al['threshold']}")
+                _rc1, _rc2 = st.columns(2)
+                if _rc1.button("🔁", key=f"rst_{_al['id']}", help="Re-arm"):
+                    st.session_state.wl_alerts = reset_alert(_al["id"])
+                    st.rerun()
+                if _rc2.button("🗑", key=f"del_{_al['id']}", help="Delete"):
+                    st.session_state.wl_alerts = remove_alert(_al["id"])
+                    st.rerun()
+        else:
+            st.caption("No alerts yet.")
 
 
 # ── Scan execution ─────────────────────────────────────────────────────────────
@@ -584,6 +661,17 @@ if view == "📋 Live Watchlist":
         with st.spinner("Fetching live quotes…"):
             st.session_state.wl_quotes = fetch_live_quotes(wl_tickers, intraday=intraday_mode)
             st.session_state.wl_last_quote_update = datetime.now()
+            # Check scenarios against fresh quotes
+            _fired = check_alerts(st.session_state.wl_quotes)
+            st.session_state.wl_alerts = load_alerts()
+            if _fired:
+                _sent = send_batch(st.session_state.wl_webhook_url, _fired)
+                for _f in _fired:
+                    _emoji = "✅" if _sent else "🔔"
+                    st.toast(
+                        f"{_emoji} Alert: **{_f['ticker']}** — {CONDITION_LABELS.get(_f['condition'], _f['condition'])}{_f['threshold']}",
+                        icon="🚨",
+                    )
 
     quotes   = st.session_state.wl_quotes
     analysis = st.session_state.wl_analysis
@@ -711,6 +799,35 @@ if view == "📋 Live Watchlist":
                 st.caption("Click 📊 Run KAT Analysis for full scoring and setup detail.")
     else:
         st.caption("👆 Click any row to see ticker detail.")
+
+    # ── Scenario alerts panel ──────────────────────────────────────────────────
+    _all_alerts = st.session_state.wl_alerts
+    if _all_alerts:
+        st.divider()
+        _n_pending  = sum(1 for a in _all_alerts if not a.get("triggered") and a.get("active"))
+        _n_fired    = sum(1 for a in _all_alerts if a.get("triggered"))
+        with st.expander(
+            f"🔔 Scenario Alerts — {_n_pending} pending, {_n_fired} triggered",
+            expanded=bool(_n_fired),
+        ):
+            _al_rows = []
+            for _al in _all_alerts:
+                _status = "✅ Triggered" if _al.get("triggered") else ("⏳ Watching" if _al.get("active") else "⏸ Paused")
+                _lbl    = CONDITION_LABELS.get(_al["condition"], _al["condition"])
+                _al_rows.append({
+                    "Ticker":    _al["ticker"],
+                    "Scenario":  f"{_lbl}{_al['threshold']}",
+                    "Note":      _al.get("description", ""),
+                    "Proj. Grade": _al.get("projected_grade", ""),
+                    "Status":    _status,
+                    "Created":   (_al.get("created_at") or "")[:10],
+                    "Triggered": (_al.get("triggered_at") or "")[:16].replace("T", " "),
+                })
+
+            _al_df = pd.DataFrame(_al_rows)
+            st.dataframe(_al_df, use_container_width=True, hide_index=True)
+
+            st.caption("Manage alerts (re-arm / delete) in the sidebar → 🔔 Scenario Alerts.")
 
     st.stop()
 
