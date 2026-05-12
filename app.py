@@ -479,9 +479,14 @@ def _render_scenario_panel(data: dict):
             with _cl2:
                 st.markdown(f'**Trigger:** `{_cond_lbl}{_sc["threshold"]}`')
                 if _pg:
+                    _delta     = _sc.get("score_delta", 0)
+                    _proj_sc   = _sc.get("projected_score", "")
+                    _delta_str = f"{'▲' if _delta >= 0 else '▼'} {abs(_delta):+d} pts → {_proj_sc}/100"
+                    _delta_col = "#00c853" if _delta >= 0 else "#ef5350"
                     st.markdown(
                         f'<span style="background:{_pg_bg};color:white;padding:2px 10px;'
-                        f'border-radius:4px;font-weight:900;font-size:1rem">{_pg}</span> projected',
+                        f'border-radius:4px;font-weight:900;font-size:1rem">{_pg}</span>'
+                        f'&nbsp;<span style="color:{_delta_col};font-size:0.85rem">{_delta_str}</span>',
                         unsafe_allow_html=True,
                     )
             with _cl3:
