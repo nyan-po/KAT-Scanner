@@ -150,7 +150,7 @@ with st.sidebar:
     st.markdown("## 📈 KAT")
     view = st.radio(
         "View",
-        ["🔍 Screener", "📋 Live Watchlist"],
+        ["🔍 Screener", "📋 Live Watchlist", "🔔 Alerts"],
         label_visibility="collapsed",
     )
     st.divider()
@@ -292,73 +292,146 @@ else:  # view == "📋 Live Watchlist"
         )
 
         st.divider()
-        st.markdown("### 🔔 Scenario Alerts")
+        _n_pending = sum(1 for a in st.session_state.wl_alerts if not a.get("triggered") and a.get("active"))
+        _n_fired   = sum(1 for a in st.session_state.wl_alerts if a.get("triggered"))
+        st.caption(f"🔔 **{_n_pending}** watching · **{_n_fired}** triggered — manage in Alerts tab")
 
-        # Discord webhook URL
-        with st.expander("Discord webhook", expanded=not st.session_state.wl_webhook_url):
-            _wh_input = st.text_input(
-                "Webhook URL",
-                value=st.session_state.wl_webhook_url,
-                type="password",
-                placeholder="https://discord.com/api/webhooks/...",
-                label_visibility="collapsed",
-            )
-            if st.button("💾 Save webhook", use_container_width=True):
-                save_webhook_url(_wh_input)
-                st.session_state.wl_webhook_url = _wh_input
-                st.success("Saved!")
 
-        # Add alert form
-        with st.expander("➕ Add scenario", expanded=False):
-            _al_ticker = st.selectbox(
-                "Ticker", st.session_state.wl_tickers or ["—"],
-                key="al_ticker",
-            )
-            _al_cond = st.selectbox(
-                "Condition",
-                list(CONDITION_LABELS.keys()),
-                format_func=lambda x: CONDITION_LABELS[x],
-                key="al_cond",
-            )
-            _al_thresh = st.number_input(
-                "Threshold", min_value=0.0, step=0.5, key="al_thresh",
-                help="Price: dollars | Day chg: percent | RelVol: multiplier",
-            )
-            _al_desc = st.text_input(
-                "Note (optional)", placeholder="e.g. dip + reclaim setup",
-                key="al_desc",
-            )
-            _al_grade = st.selectbox(
-                "Projected grade if triggered",
-                ["", "A+", "A", "A-", "B+", "B", "B-", "C"],
-                format_func=lambda x: "— none —" if x == "" else x,
-                key="al_grade",
-            )
-            if st.button("Add alert", use_container_width=True, type="primary"):
-                if st.session_state.wl_tickers:
-                    st.session_state.wl_alerts = add_alert(
-                        _al_ticker, _al_cond, _al_thresh,
-                        description=_al_desc,
-                        projected_grade=_al_grade,
-                    )
-                    st.rerun()
+# ── Alerts sidebar ────────────────────────────────────────────────────────────
+if view == "🔔 Alerts":
+    with st.sidebar:
+        st.markdown("### ➕ Add Alert Manually")
+        _ma_ticker = st.text_input("Ticker", placeholder="e.g. CORZ", key="ma_ticker")
+        _ma_cond   = st.selectbox(
+            "Condition", list(CONDITION_LABELS.keys()),
+            format_func=lambda x: CONDITION_LABELS[x], key="ma_cond",
+        )
+        _ma_thresh = st.number_input(
+            "Threshold", min_value=0.0, step=0.5, key="ma_thresh",
+            help="Price: dollars · Day chg: percent · RelVol: multiplier",
+        )
+        _ma_desc  = st.text_input("Note (optional)", key="ma_desc",
+                                   placeholder="e.g. dip + reclaim setup")
+        _ma_grade = st.selectbox(
+            "Projected grade",
+            ["", "A+", "A", "A-", "B+", "B", "B-", "C"],
+            format_func=lambda x: "— none —" if x == "" else x, key="ma_grade",
+        )
+        if st.button("Add alert", type="primary", use_container_width=True):
+            if _ma_ticker.strip():
+                st.session_state.wl_alerts = add_alert(
+                    _ma_ticker.strip(), _ma_cond, _ma_thresh,
+                    description=_ma_desc, projected_grade=_ma_grade,
+                )
+                st.rerun()
 
-        # Active alerts list
-        _active = [a for a in st.session_state.wl_alerts if a.get("active")]
-        if _active:
-            for _al in _active:
-                _status = "✅" if _al.get("triggered") else "⏳"
-                _lbl    = CONDITION_LABELS.get(_al["condition"], _al["condition"])
-                st.caption(f"{_status} **{_al['ticker']}** — {_lbl}{_al['threshold']}")
-                _rc1, _rc2 = st.columns(2)
-                if _rc1.button("🔁", key=f"rst_{_al['id']}", help="Re-arm"):
-                    st.session_state.wl_alerts = reset_alert(_al["id"])
-                    st.rerun()
-                if _rc2.button("🗑", key=f"del_{_al['id']}", help="Delete"):
-                    st.session_state.wl_alerts = remove_alert(_al["id"])
-                    st.rerun()
-        else:
-            st.caption("No alerts yet.")
+
+# ── Alerts main view ──────────────────────────────────────────────────────────
+if view == "🔔 Alerts":
+    st.markdown("# 🔔 Scenario Alerts")
+
+    # ── Discord webhook ────────────────────────────────────────────────────────
+    with st.expander(
+        "⚙️ Discord webhook" + (" ✅" if st.session_state.wl_webhook_url else " — not configured"),
+        expanded=not st.session_state.wl_webhook_url,
+    ):
+        _wh_col1, _wh_col2 = st.columns([5, 1])
+        _wh_input = _wh_col1.text_input(
+            "Webhook URL",
+            value=st.session_state.wl_webhook_url,
+            type="password",
+            placeholder="https://discord.com/api/webhooks/...",
+            label_visibility="collapsed",
+        )
+        if _wh_col2.button("Save", use_container_width=True):
+            save_webhook_url(_wh_input)
+            st.session_state.wl_webhook_url = _wh_input
+            st.toast("Webhook saved!", icon="✅")
+        st.caption(
+            "Get this from your Discord server: Server Settings → Integrations → Webhooks → New Webhook → Copy URL"
+        )
+
+    st.divider()
+
+    all_alerts = st.session_state.wl_alerts
+    if not all_alerts:
+        st.info("No alerts yet. Generate scenarios from the Screener or Watchlist ticker detail, or add one manually in the sidebar.")
+        st.stop()
+
+    # ── Summary metrics ────────────────────────────────────────────────────────
+    _n_watch   = sum(1 for a in all_alerts if not a.get("triggered") and a.get("active"))
+    _n_fired   = sum(1 for a in all_alerts if a.get("triggered"))
+    _n_total   = len(all_alerts)
+    _mc1, _mc2, _mc3 = st.columns(3)
+    _mc1.metric("Watching",  _n_watch)
+    _mc2.metric("Triggered", _n_fired)
+    _mc3.metric("Total",     _n_total)
+
+    st.divider()
+
+    # ── Watching (untriggered) ─────────────────────────────────────────────────
+    _watching = [a for a in all_alerts if not a.get("triggered") and a.get("active")]
+    st.markdown(f"### ⏳ Watching ({len(_watching)})")
+    if not _watching:
+        st.caption("Nothing watching right now.")
+    else:
+        for _al in _watching:
+            _lbl = CONDITION_LABELS.get(_al["condition"], _al["condition"])
+            _pg  = _al.get("projected_grade", "")
+            _pg_bg = GRADE_BG.get(_pg, "#555")
+            with st.container(border=True):
+                _ac1, _ac2, _ac3, _ac4 = st.columns([2, 4, 2, 1])
+                _ac1.markdown(f"**{_al['ticker']}**")
+                _ac2.markdown(f"`{_lbl}{_al['threshold']}`  \n{_al.get('description','')}")
+                with _ac3:
+                    if _pg:
+                        st.markdown(
+                            f'<span style="background:{_pg_bg};color:white;padding:2px 8px;'
+                            f'border-radius:4px;font-weight:900">{_pg}</span> projected',
+                            unsafe_allow_html=True,
+                        )
+                    st.caption(f"Added {(_al.get('created_at') or '')[:10]}")
+                with _ac4:
+                    if st.button("🗑", key=f"alw_del_{_al['id']}", help="Delete"):
+                        st.session_state.wl_alerts = remove_alert(_al["id"])
+                        st.rerun()
+
+    st.divider()
+
+    # ── Triggered ─────────────────────────────────────────────────────────────
+    _fired = [a for a in all_alerts if a.get("triggered")]
+    st.markdown(f"### ✅ Triggered ({len(_fired)})")
+    if not _fired:
+        st.caption("None triggered yet.")
+    else:
+        for _al in _fired:
+            _lbl = CONDITION_LABELS.get(_al["condition"], _al["condition"])
+            _pg  = _al.get("projected_grade", "")
+            _pg_bg = GRADE_BG.get(_pg, "#555")
+            with st.container(border=True):
+                _tc1, _tc2, _tc3, _tc4 = st.columns([2, 4, 2, 1])
+                _tc1.markdown(f"**{_al['ticker']}**")
+                _tc2.markdown(
+                    f"`{_lbl}{_al['threshold']}`  \n"
+                    f"{_al.get('description','')}  \n"
+                    f"Fired: {(_al.get('triggered_at') or '')[:16].replace('T',' ')}"
+                )
+                with _tc3:
+                    if _pg:
+                        st.markdown(
+                            f'<span style="background:{_pg_bg};color:white;padding:2px 8px;'
+                            f'border-radius:4px;font-weight:900">{_pg}</span> projected',
+                            unsafe_allow_html=True,
+                        )
+                with _tc4:
+                    if st.button("🔁", key=f"alf_rst_{_al['id']}", help="Re-arm"):
+                        st.session_state.wl_alerts = reset_alert(_al["id"])
+                        st.rerun()
+                    if st.button("🗑", key=f"alf_del_{_al['id']}", help="Delete"):
+                        st.session_state.wl_alerts = remove_alert(_al["id"])
+                        st.rerun()
+
+    st.stop()
 
 
 # ── Scan execution ─────────────────────────────────────────────────────────────
@@ -867,35 +940,6 @@ if view == "📋 Live Watchlist":
                 st.caption("Click 📊 Run KAT Analysis for full scoring and scenario generation.")
     else:
         st.caption("👆 Click any row to see detail and generate scenarios.")
-
-    # ── Scenario alerts panel ──────────────────────────────────────────────────
-    _all_alerts = st.session_state.wl_alerts
-    if _all_alerts:
-        st.divider()
-        _n_pending  = sum(1 for a in _all_alerts if not a.get("triggered") and a.get("active"))
-        _n_fired    = sum(1 for a in _all_alerts if a.get("triggered"))
-        with st.expander(
-            f"🔔 Scenario Alerts — {_n_pending} pending, {_n_fired} triggered",
-            expanded=bool(_n_fired),
-        ):
-            _al_rows = []
-            for _al in _all_alerts:
-                _status = "✅ Triggered" if _al.get("triggered") else ("⏳ Watching" if _al.get("active") else "⏸ Paused")
-                _lbl    = CONDITION_LABELS.get(_al["condition"], _al["condition"])
-                _al_rows.append({
-                    "Ticker":    _al["ticker"],
-                    "Scenario":  f"{_lbl}{_al['threshold']}",
-                    "Note":      _al.get("description", ""),
-                    "Proj. Grade": _al.get("projected_grade", ""),
-                    "Status":    _status,
-                    "Created":   (_al.get("created_at") or "")[:10],
-                    "Triggered": (_al.get("triggered_at") or "")[:16].replace("T", " "),
-                })
-
-            _al_df = pd.DataFrame(_al_rows)
-            st.dataframe(_al_df, use_container_width=True, hide_index=True)
-
-            st.caption("Manage alerts (re-arm / delete) in the sidebar → 🔔 Scenario Alerts.")
 
     st.stop()
 
