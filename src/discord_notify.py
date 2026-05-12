@@ -3,6 +3,7 @@ Discord webhook sender for KAT alert notifications.
 """
 import logging
 import requests
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +82,62 @@ def send_batch(webhook_url: str, triggered_alerts: list[dict], ping_id: str = ""
     return sum(send_alert(webhook_url, a, ping_id=ping_id) for a in triggered_alerts)
 
 
-def send_test(webhook_url: str) -> tuple[bool, str]:
+def send_scan_summary(
+    webhook_url: str,
+    results: list[dict],
+    scan_type: str = "market",
+    mode: str = "short_term",
+    total_scanned: int = 0,
+    ping_id: str = "",
+) -> bool:
+    """Send a formatted scan summary embed to Discord."""
+    if not webhook_url or not results:
+        return False
+
+    lines = []
+    for i, r in enumerate(results[:15], 1):
+        ticker  = r.get("ticker", "")
+        grade   = r.get("kat_grade", "?")
+        score   = r.get("kat_score", 0)
+        setup   = r.get("setup_type", "")
+        action  = r.get("suggested_action", "")
+        lines.append(f"{i}. **{ticker}** {grade} / {score} - {setup} ({action})")
+
+    mode_label = "short_term" if mode == "short_term" else "long_term"
+    description = (
+        f"**{scan_type} / {mode_label}**\n\n"
+        + "\n".join(lines)
+        + f"\n\n**Scanned:** {total_scanned}   **Passing:** {len(results)}\n"
+        + f"**Timestamp:** {datetime.now().strftime('%Y-%m-%dT%H:%M:%S')}"
+    )
+
+    top_grade = results[0].get("kat_grade", "C") if results else "C"
+    color = (
+        0x00C853 if top_grade in ("A+", "A", "A-") else
+        0x0288D1 if top_grade in ("B+", "B", "B-") else
+        0xF9A825
+    )
+
+    embed = {
+        "title":       "📈 KAT Pre-Market Scan",
+        "description": description,
+        "color":       color,
+        "footer":      {"text": "KAT Market Screener"},
+    }
+
+    content = f"<@{ping_id}>" if ping_id.strip() else ""
+
+    try:
+        resp = requests.post(
+            webhook_url,
+            json={"content": content, "embeds": [embed]},
+            timeout=15,
+        )
+        resp.raise_for_status()
+        return True
+    except Exception as e:
+        logger.warning(f"Discord scan summary failed: {e}")
+        return False
     """Send a test embed to verify the webhook URL works. Returns (ok, message)."""
     if not webhook_url:
         return False, "No webhook URL configured."
