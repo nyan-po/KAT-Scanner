@@ -39,7 +39,7 @@ from src.alerts import (
     add_alert, remove_alert, reset_alert, check_alerts,
     CONDITION_LABELS,
 )
-from src.discord_notify import send_batch
+from src.discord_notify import send_alert, send_batch, send_test
 from src.scenario_gen import generate_scenarios
 
 try:
@@ -335,20 +335,26 @@ if view == "🔔 Alerts":
         "⚙️ Discord webhook" + (" ✅" if st.session_state.wl_webhook_url else " — not configured"),
         expanded=not st.session_state.wl_webhook_url,
     ):
-        _wh_col1, _wh_col2 = st.columns([5, 1])
-        _wh_input = _wh_col1.text_input(
+        _wh_input = st.text_input(
             "Webhook URL",
             value=st.session_state.wl_webhook_url,
             type="password",
             placeholder="https://discord.com/api/webhooks/...",
             label_visibility="collapsed",
         )
-        if _wh_col2.button("Save", use_container_width=True):
+        _wh_c1, _wh_c2 = st.columns(2)
+        if _wh_c1.button("💾 Save", use_container_width=True):
             save_webhook_url(_wh_input)
             st.session_state.wl_webhook_url = _wh_input
             st.toast("Webhook saved!", icon="✅")
+        if _wh_c2.button("📨 Test", use_container_width=True):
+            _ok, _msg = send_test(st.session_state.wl_webhook_url or _wh_input)
+            if _ok:
+                st.success(_msg)
+            else:
+                st.error(f"Failed: {_msg}")
         st.caption(
-            "Get this from your Discord server: Server Settings → Integrations → Webhooks → New Webhook → Copy URL"
+            "Server Settings → Integrations → Webhooks → New Webhook → Copy URL"
         )
 
     st.divider()
@@ -392,6 +398,17 @@ if view == "🔔 Alerts":
                         )
                     st.caption(f"Added {(_al.get('created_at') or '')[:10]}")
                 with _ac4:
+                    if st.button("▶", key=f"alw_tst_{_al['id']}", help="Force trigger — sends real Discord message"):
+                        _test_alert = {
+                            **_al,
+                            "triggered_at": datetime.now().isoformat(timespec="seconds"),
+                            "quote": st.session_state.wl_quotes.get(_al["ticker"], {}),
+                        }
+                        _ok = send_alert(st.session_state.wl_webhook_url, _test_alert)
+                        if _ok:
+                            st.toast(f"Test fired for {_al['ticker']} — check Discord", icon="📨")
+                        else:
+                            st.toast("Send failed — check webhook URL in settings", icon="❌")
                     if st.button("🗑", key=f"alw_del_{_al['id']}", help="Delete"):
                         st.session_state.wl_alerts = remove_alert(_al["id"])
                         st.rerun()
