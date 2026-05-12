@@ -437,40 +437,86 @@ def _short_term_setup_type(data: dict, tech: dict, news: dict) -> str:
     short_pct = data.get("short_percent_float") or 0
     earnings_date = data.get("earnings_date")
     cat_quality = news.get("catalyst_quality", "")
-
+    extended = tech.get("is_extended", False)
+    above_ema9 = tech.get("above_ema9")
     avg_vol = data.get("avg_volume") or 0
+    quote_type = (data.get("quote_type") or "").upper()
+
+    # ETFs — no short-term trade setup
+    if quote_type in ("ETF", "MUTUALFUND"):
+        return "ETF/index — no setup"
+
+    # Illiquid
     if avg_vol < 100000 and rv < 1.0:
         return "avoid/no trade"
 
+    # Earnings catalyst — highest priority
     if earnings_date:
         return "earnings mover"
 
-    if short_pct >= 20 and rv >= 2.0:
+    # Squeeze setup: high short float + elevated volume
+    if short_pct >= 15 and rv >= 1.5:
         return "squeeze watch"
 
-    if day_change > 4 and rv >= 2.0 and "bullish" in signal:
-        return "gap-up continuation"
+    # Large gap up (>5%) with volume
+    if day_change > 5:
+        if rv >= 1.5 and not extended:
+            return "gap-up continuation"
+        elif extended or rv < 1.0:
+            return "gap-up extended — wait"
+        else:
+            return "gap-up watch"
 
-    if day_change < -5 and rv >= 1.5:
-        if "reversal" in signal or "above_ema9" in str(tech.get("above_ema9")):
-            return "gap-down reversal"
+    # Large gap down (>4%) — reversal or continued selling
+    if day_change < -4:
+        if rv >= 1.3 and (above_ema9 is True or "reversal" in signal):
+            return "gap-down reversal watch"
+        elif rv >= 1.5:
+            return "high-vol selloff — avoid"
+        else:
+            return "pullback — monitor"
 
-    if rv >= 2.0 and day_change > 2 and "bullish" in signal:
-        return "momentum runner"
+    # Momentum runner: meaningful up day with above-avg volume
+    if day_change > 2 and rv >= 1.3:
+        if "bullish" in signal:
+            return "momentum runner"
+        else:
+            return "volume surge — watch"
 
-    if "bullish" in signal and rv >= 1.2:
+    # Breakout candidate: bullish technical + above-avg volume
+    if "bullish with volume" in signal:
         return "breakout candidate"
 
+    if "bullish" in signal and rv >= 1.2:
+        if extended:
+            return "bullish but extended"
+        return "breakout candidate"
+
+    # Reversal setup
     if "reversal" in signal:
         return "VWAP reclaim candidate"
 
-    if "bearish" not in signal and "cat" in cat_quality:
+    # Sector sympathy: positive catalyst, not bearish
+    if "positive" in cat_quality and "bearish" not in signal:
         return "sector sympathy play"
 
-    if "bearish" in signal:
-        return "avoid/no trade"
+    # Bearish trend
+    if "bearish" in signal and rv >= 1.2:
+        return "distribution — avoid"
 
-    return "watchlist"
+    # Mild down day with normal volume — potential entry on pullback
+    if -4 <= day_change < -1 and rv < 1.3:
+        return "orderly pullback"
+
+    # Flat / low activity
+    if abs(day_change) < 1 and rv < 1.1:
+        return "low activity — neutral"
+
+    # Mild up day, normal volume
+    if 0 < day_change <= 2:
+        return "mild upside — monitor"
+
+    return "no clear setup"
 
 
 def _long_term_setup_type(data: dict, tech: dict, fund: dict) -> str:
