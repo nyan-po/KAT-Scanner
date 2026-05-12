@@ -40,7 +40,7 @@ from src.alerts import (
     add_alert, remove_alert, reset_alert, check_alerts,
     CONDITION_LABELS,
 )
-from src.discord_notify import send_alert, send_batch, send_test, send_scan_summary
+from src.discord_notify import send_alert, send_batch, send_test
 from src.scenario_gen import generate_scenarios
 
 try:
@@ -302,18 +302,6 @@ else:  # view == "📋 Live Watchlist"
 # ── Alerts sidebar ────────────────────────────────────────────────────────────
 if view == "🔔 Alerts":
     with st.sidebar:
-        st.markdown("### 📡 Run Scan Now")
-        _rs_scan = st.selectbox("Universe", ["market", "watchlist"], key="rs_scan")
-        _rs_mode = st.selectbox(
-            "Mode", ["short_term", "long_term"],
-            format_func=lambda x: "📊 Short Term" if x == "short_term" else "📐 Long Term",
-            key="rs_mode",
-        )
-        _rs_top  = st.slider("Top N results", 5, 25, 15, key="rs_top")
-        _rs_post = st.toggle("Post to Discord", value=True, key="rs_post")
-        _rs_btn  = st.button("🚀 Run Now", type="primary", use_container_width=True, key="rs_run")
-
-        st.divider()
         st.markdown("### ➕ Add Alert Manually")
         _ma_ticker = st.text_input("Ticker", placeholder="e.g. CORZ", key="ma_ticker")
         _ma_cond   = st.selectbox(
@@ -343,87 +331,6 @@ if view == "🔔 Alerts":
 # ── Alerts main view ──────────────────────────────────────────────────────────
 if view == "🔔 Alerts":
     st.markdown("# 🔔 Scenario Alerts")
-
-    # ── Force-run scan ─────────────────────────────────────────────────────────
-    if _rs_btn:
-        _watchlist_cfg   = get_watchlist(cfg)
-        _sector_maps_cfg = get_sector_mappings(cfg)
-        _score_fn_cfg    = score_short_term if _rs_mode == "short_term" else score_long_term
-
-        with st.spinner("Building universe…"):
-            if _rs_scan == "watchlist":
-                _rs_tickers = build_watchlist_universe(_watchlist_cfg)
-            else:
-                _rs_tickers = build_universe(get_universe_config(cfg), _watchlist_cfg)
-
-        if not _rs_tickers:
-            st.error("No tickers found.")
-        else:
-            _rs_total  = len(_rs_tickers)
-            _rs_prog   = st.progress(0.0, text=f"Scanning 0 / {_rs_total}…")
-            _rs_raw    = []
-            _rs_failed = []
-
-            for _ri, _rt in enumerate(_rs_tickers, 1):
-                _rs_prog.progress(_ri / _rs_total, text=f"Scanning {_ri} / {_rs_total} — {_rt}")
-                _rd = fetch_ticker_data(_rt)
-                if _rd:
-                    try:
-                        _rks = next((s for s, m in _sector_maps_cfg.items() if _rt in m), None)
-                        _rsc = _score_fn_cfg(_rd, kat_sector=_rks)
-                        _rs_raw.append({**_rd, **_rsc, "kat_grade": score_to_grade(_rsc["kat_score"])})
-                    except Exception:
-                        _rs_failed.append(_rt)
-                else:
-                    _rs_failed.append(_rt)
-                time.sleep(0.05)
-
-            _rs_prog.empty()
-
-            _rs_filters = get_filters(cfg, {"max_results": _rs_top})
-            _rs_final   = limit_results(sort_results(apply_filters(_rs_raw, _rs_filters)), _rs_top)
-
-            st.success(f"Scanned {_rs_total} tickers · {len(_rs_final)} passing · {len(_rs_failed)} failed")
-
-            # Show results table
-            if _rs_final:
-                _rs_rows = []
-                for _ri2, _rr in enumerate(_rs_final, 1):
-                    _rs_rows.append({
-                        "Rank":   _ri2,
-                        "Ticker": _rr.get("ticker", ""),
-                        "Grade":  _rr.get("kat_grade", ""),
-                        "Score":  _rr.get("kat_score", 0),
-                        "Setup":  _rr.get("setup_type", ""),
-                        "Action": _rr.get("suggested_action", ""),
-                    })
-                _rs_df = pd.DataFrame(_rs_rows)
-                st.dataframe(
-                    _rs_df.style
-                        .map(grade_color_style,  subset=["Grade"])
-                        .map(action_color_style, subset=["Action"]),
-                    use_container_width=True, hide_index=True,
-                )
-
-                # Post to Discord
-                if _rs_post:
-                    if not st.session_state.wl_webhook_url:
-                        st.warning("No webhook URL saved — configure it below.")
-                    else:
-                        _rs_ok = send_scan_summary(
-                            st.session_state.wl_webhook_url,
-                            _rs_final,
-                            scan_type     = _rs_scan,
-                            mode          = _rs_mode,
-                            total_scanned = _rs_total,
-                            ping_id       = st.session_state.wl_ping_id,
-                        )
-                        if _rs_ok:
-                            st.toast("Scan results posted to Discord!", icon="📨")
-                        else:
-                            st.error("Discord post failed — check webhook URL.")
-            else:
-                st.info("No tickers passed filters.")
 
     st.divider()
 
