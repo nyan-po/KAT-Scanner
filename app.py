@@ -30,6 +30,7 @@ from src.watchlist import (
     save_watchlist as wl_save,
     add_ticker as wl_add,
     remove_ticker as wl_remove,
+    load_entries as wl_load_entries,
     save_daily_snapshot, load_latest_snapshot,
 )
 from src.live_data import fetch_live_quotes
@@ -242,7 +243,16 @@ else:  # view == "📋 Live Watchlist"
             "New ticker", placeholder="e.g. NVDA", label_visibility="collapsed",
         )
         if _at2.button("Add", use_container_width=True) and _new_tick.strip():
-            st.session_state.wl_tickers = wl_add(_new_tick.strip())
+            _tick_up = _new_tick.strip().upper()
+            # Grab entry price from cached quotes or do a quick fetch
+            _entry_p = st.session_state.wl_quotes.get(_tick_up, {}).get("price")
+            if _entry_p is None:
+                try:
+                    _quick = fetch_live_quotes([_tick_up], intraday=False)
+                    _entry_p = _quick.get(_tick_up, {}).get("price")
+                except Exception:
+                    pass
+            st.session_state.wl_tickers = wl_add(_tick_up, entry_price=_entry_p)
             st.rerun()
 
         st.divider()
@@ -618,37 +628,43 @@ if view == "📋 Live Watchlist":
     st.divider()
 
     # ── Quotes + analysis table ────────────────────────────────────────────────
+    _entries = wl_load_entries()
     _wl_rows = []
     for _wt in wl_tickers:
-        _q  = quotes.get(_wt, {})
-        _a  = analysis.get(_wt, {})
-        _p  = _q.get("price")
-        _c  = _q.get("day_change_pct")
-        _rv = _q.get("rel_volume")
+        _q   = quotes.get(_wt, {})
+        _a   = analysis.get(_wt, {})
+        _p   = _q.get("price")
+        _c   = _q.get("day_change_pct")
+        _rv  = _q.get("rel_volume")
+        _ent = _entries.get(_wt, {})
+        _ep  = _ent.get("entry_price")
+        _pnl = round((_p - _ep) / _ep * 100, 2) if (_p is not None and _ep) else None
         _wl_rows.append({
-            "Ticker":  _wt,
-            "Price":   f"${_p:.2f}" if _p is not None else "—",
-            "% Chg":   fmt_pct(_c) if _c is not None else "—",
-            "RelVol":  f"{_rv:.1f}x" if _rv is not None else "—",
-            "Volume":  f"{int(_q['volume']):,}" if _q.get("volume") else "—",
-            "Grade":   _a.get("kat_grade", ""),
-            "Score":   _a.get("kat_score", ""),
-            "Setup":   _a.get("setup_type", ""),
-            "Action":  _a.get("suggested_action", ""),
-            "Updated": _q.get("fetched_at", "")[-8:] if _q.get("fetched_at") else "—",
+            "Ticker":   _wt,
+            "Entry $":  f"${_ep:.2f}" if _ep is not None else "—",
+            "Price":    f"${_p:.2f}" if _p is not None else "—",
+            "P&L %":    fmt_pct(_pnl) if _pnl is not None else "—",
+            "Day %":    fmt_pct(_c) if _c is not None else "—",
+            "RelVol":   f"{_rv:.1f}x" if _rv is not None else "—",
+            "Volume":   f"{int(_q['volume']):,}" if _q.get("volume") else "—",
+            "Grade":    _a.get("kat_grade", ""),
+            "Score":    _a.get("kat_score", ""),
+            "Setup":    _a.get("setup_type", ""),
+            "Action":   _a.get("suggested_action", ""),
+            "Added":    (_ent.get("added_at") or "")[:10] or "—",
+            "Updated":  _q.get("fetched_at", "")[-8:] if _q.get("fetched_at") else "—",
         })
 
     _wl_df = pd.DataFrame(_wl_rows)
-    _grade_col  = ["Grade"]  if "Grade"  in _wl_df.columns else []
+    _grade_col  = ["Grade"] if "Grade" in _wl_df.columns else []
     _action_col = ["Action"] if "Action" in _wl_df.columns else []
-    _chg_col    = ["% Chg"]  if "% Chg"  in _wl_df.columns else []
+    _chg_col    = ["Day %", "P&L %"]
     _wl_styled = _wl_df.style
     if _grade_col:
         _wl_styled = _wl_styled.map(grade_color_style,  subset=_grade_col)
     if _action_col:
         _wl_styled = _wl_styled.map(action_color_style, subset=_action_col)
-    if _chg_col:
-        _wl_styled = _wl_styled.map(chg_color_style,    subset=_chg_col)
+    _wl_styled = _wl_styled.map(chg_color_style, subset=_chg_col)
 
     _wl_event = st.dataframe(
         _wl_styled,
