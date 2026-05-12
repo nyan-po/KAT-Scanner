@@ -139,7 +139,7 @@ for key, default in [
     ("wl_selected_idx", None),
     ("wl_alerts", load_alerts()),
     ("wl_webhook_url", load_webhook_url()),
-    ("wl_scenarios", {}),   # {ticker: [scenario, ...]}
+    ("wl_scenarios", {}),   # {ticker: [scenario, ...]} — shared across both views
 ]:
     if key not in st.session_state:
         st.session_state[key] = default
@@ -437,6 +437,64 @@ if run_btn:
         "failed": failed,
     }
     st.rerun()
+
+
+# ── Scenario panel (shared by screener + watchlist) ───────────────────────────
+def _render_scenario_panel(data: dict):
+    """Render the ⚡ Generate Scenarios section for any scored ticker dict."""
+    ticker = data.get("ticker", "")
+    _prio_color = {"high": "#ef5350", "medium": "#f9a825", "low": "#78909c"}
+
+    st.divider()
+    st.markdown("### 🎯 Scenario Generator")
+
+    if st.button("⚡ Generate Scenarios", use_container_width=False, type="primary", key=f"gensc_{ticker}"):
+        st.session_state.wl_scenarios[ticker] = generate_scenarios(data)
+
+    _scens = st.session_state.wl_scenarios.get(ticker, [])
+    if not _scens:
+        st.caption("Click **⚡ Generate Scenarios** to get data-driven setups for this ticker.")
+        return
+
+    for _si, _sc in enumerate(_scens):
+        _pg       = _sc.get("projected_grade", "")
+        _pg_bg    = GRADE_BG.get(_pg, "#555")
+        _prio     = _sc.get("priority", "medium")
+        _pc       = _prio_color.get(_prio, "#aaa")
+        _cond_lbl = CONDITION_LABELS.get(_sc["condition"], _sc["condition"])
+
+        with st.container(border=True):
+            _cl1, _cl2, _cl3 = st.columns([4, 2, 1])
+            with _cl1:
+                st.markdown(
+                    f'<span style="font-weight:700;font-size:1rem">{_sc["level_name"]}</span>'
+                    f'&nbsp;&nbsp;<span style="color:{_pc};font-size:0.8rem">● {_prio}</span>',
+                    unsafe_allow_html=True,
+                )
+                st.caption(_sc["description"])
+                st.markdown(
+                    f'<span style="color:#aaa;font-size:0.82rem">{_sc["reasoning"]}</span>',
+                    unsafe_allow_html=True,
+                )
+            with _cl2:
+                st.markdown(f'**Trigger:** `{_cond_lbl}{_sc["threshold"]}`')
+                if _pg:
+                    st.markdown(
+                        f'<span style="background:{_pg_bg};color:white;padding:2px 10px;'
+                        f'border-radius:4px;font-weight:900;font-size:1rem">{_pg}</span> projected',
+                        unsafe_allow_html=True,
+                    )
+            with _cl3:
+                if st.button("＋ Add", key=f"addsc_{ticker}_{_si}", use_container_width=True,
+                             help="Add to Scenario Alerts"):
+                    st.session_state.wl_alerts = add_alert(
+                        ticker,
+                        _sc["condition"],
+                        _sc["threshold"],
+                        description=_sc["description"],
+                        projected_grade=_pg,
+                    )
+                    st.toast(f"Alert added: {ticker} — {_sc['level_name']}", icon="✅")
 
 
 # ── Ticker detail renderer (shared by screener + watchlist) ────────────────────
@@ -782,70 +840,7 @@ if view == "📋 Live Watchlist":
                 st.markdown(f"### 🔍 Detail — {_sel}")
                 _render_detail(_qa)
 
-                # ── Scenario generator ─────────────────────────────────────
-                st.divider()
-                st.markdown("### 🎯 Scenario Generator")
-
-                _sc_col1, _sc_col2 = st.columns([2, 5])
-                with _sc_col1:
-                    if st.button("⚡ Generate Scenarios", use_container_width=True, type="primary"):
-                        st.session_state.wl_scenarios[_sel] = generate_scenarios(_qa)
-
-                _scens = st.session_state.wl_scenarios.get(_sel, [])
-
-                if not _scens:
-                    st.caption("Click **⚡ Generate Scenarios** to get data-driven setups for this ticker.")
-                else:
-                    _prio_color = {"high": "#ef5350", "medium": "#f9a825", "low": "#78909c"}
-                    for _si, _sc in enumerate(_scens):
-                        _pg      = _sc.get("projected_grade", "")
-                        _pg_bg   = GRADE_BG.get(_pg, "#555")
-                        _prio    = _sc.get("priority", "medium")
-                        _pc      = _prio_color.get(_prio, "#aaa")
-                        _cond_lbl = CONDITION_LABELS.get(_sc["condition"], _sc["condition"])
-
-                        with st.container(border=True):
-                            _sl1, _sl2, _sl3 = st.columns([4, 2, 1])
-                            with _sl1:
-                                st.markdown(
-                                    f'<span style="font-weight:700;font-size:1rem">'
-                                    f'{_sc["level_name"]}</span>'
-                                    f'&nbsp;&nbsp;<span style="color:{_pc};font-size:0.8rem">'
-                                    f'● {_prio}</span>',
-                                    unsafe_allow_html=True,
-                                )
-                                st.caption(_sc["description"])
-                                st.markdown(
-                                    f'<span style="color:#aaa;font-size:0.82rem">'
-                                    f'{_sc["reasoning"]}</span>',
-                                    unsafe_allow_html=True,
-                                )
-                            with _sl2:
-                                st.markdown(
-                                    f'**Trigger:** `{_cond_lbl}{_sc["threshold"]}`',
-                                )
-                                if _pg:
-                                    st.markdown(
-                                        f'<span style="background:{_pg_bg};color:white;'
-                                        f'padding:2px 10px;border-radius:4px;font-weight:900;'
-                                        f'font-size:1rem">{_pg}</span> projected',
-                                        unsafe_allow_html=True,
-                                    )
-                            with _sl3:
-                                if st.button(
-                                    "＋ Add",
-                                    key=f"addsc_{_sel}_{_si}",
-                                    use_container_width=True,
-                                    help="Add to Scenario Alerts",
-                                ):
-                                    st.session_state.wl_alerts = add_alert(
-                                        _sel,
-                                        _sc["condition"],
-                                        _sc["threshold"],
-                                        description=_sc["description"],
-                                        projected_grade=_pg,
-                                    )
-                                    st.toast(f"Alert added: {_sel} — {_sc['level_name']}", icon="✅")
+                _render_scenario_panel(_qa)
 
             elif _qq:
                 st.divider()
@@ -998,5 +993,6 @@ if st.session_state.selected_idx is not None:
         st.divider()
         st.markdown("### 🔍 Ticker Detail — click another row to switch")
         _render_detail(results[idx])
+        _render_scenario_panel(results[idx])
 else:
     st.caption("👆 Click any row in the table to see full ticker detail.")
