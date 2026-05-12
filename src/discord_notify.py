@@ -82,6 +82,26 @@ def send_batch(webhook_url: str, triggered_alerts: list[dict], ping_id: str = ""
     return sum(send_alert(webhook_url, a, ping_id=ping_id) for a in triggered_alerts)
 
 
+def send_test(webhook_url: str) -> tuple[bool, str]:
+    """Send a test embed to verify the webhook URL works. Returns (ok, message)."""
+    if not webhook_url:
+        return False, "No webhook URL configured."
+    embed = {
+        "title":       "🔔 KAT Alert — Test",
+        "description": "**TEST** — your Discord webhook is connected correctly.\nReal alerts will look like this when a scenario triggers.",
+        "color":       0x0288D1,
+        "footer":      {"text": "KAT Market Screener"},
+    }
+    try:
+        resp = requests.post(webhook_url, json={"embeds": [embed]}, timeout=10)
+        resp.raise_for_status()
+        return True, "Test message sent successfully!"
+    except requests.HTTPError as e:
+        return False, f"HTTP error {e.response.status_code}: {e.response.text[:200]}"
+    except Exception as e:
+        return False, str(e)
+
+
 def send_scan_summary(
     webhook_url: str,
     results: list[dict],
