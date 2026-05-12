@@ -25,6 +25,20 @@ from src.data import fetch_ticker_data
 from src.scoring import score_short_term, score_long_term
 from src.grading import score_to_grade
 from src.filters import apply_filters, sort_results, limit_results
+from src.watchlist import (
+    load_watchlist as wl_load,
+    save_watchlist as wl_save,
+    add_ticker as wl_add,
+    remove_ticker as wl_remove,
+    save_daily_snapshot, load_latest_snapshot,
+)
+from src.live_data import fetch_live_quotes
+
+try:
+    from streamlit_autorefresh import st_autorefresh
+    _HAS_AUTOREFRESH = True
+except ImportError:
+    _HAS_AUTOREFRESH = False
 
 # ── Page config ────────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -101,10 +115,20 @@ def _load_cfg():
 cfg = _load_cfg()
 
 # ── Session state ──────────────────────────────────────────────────────────────
+# Seed watchlist from config.yaml on first load if file doesn't exist
+if not wl_load() and get_watchlist(cfg):
+    wl_save(get_watchlist(cfg))
+
 for key, default in [
     ("results", []),
     ("scan_meta", {}),
     ("selected_idx", None),
+    ("wl_tickers", wl_load()),
+    ("wl_quotes", {}),
+    ("wl_analysis", {}),
+    ("wl_last_quote_update", None),
+    ("wl_last_analysis_update", None),
+    ("wl_selected_idx", None),
 ]:
     if key not in st.session_state:
         st.session_state[key] = default
@@ -112,9 +136,20 @@ for key, default in [
 
 # ── Sidebar ────────────────────────────────────────────────────────────────────
 with st.sidebar:
-    st.markdown("## 📈 KAT Screener")
+    st.markdown("## 📈 KAT")
+    view = st.radio(
+        "View",
+        ["🔍 Screener", "📋 Live Watchlist"],
+        label_visibility="collapsed",
+    )
     st.divider()
 
+# Defaults so screener-only variables exist when on the watchlist view
+run_btn = False
+
+# ── Screener sidebar ───────────────────────────────────────────────────────────
+if view == "🔍 Screener":
+  with st.sidebar:
     st.markdown("### Scan")
     scan_type = st.selectbox(
         "Scan type",
@@ -198,6 +233,44 @@ with st.sidebar:
             use_container_width=True,
         )
 
+# ── Watchlist sidebar ──────────────────────────────────────────────────────────
+else:  # view == "📋 Live Watchlist"
+    with st.sidebar:
+        st.markdown("### ➕ Add Ticker")
+        _at1, _at2 = st.columns([3, 1])
+        _new_tick = _at1.text_input(
+            "New ticker", placeholder="e.g. NVDA", label_visibility="collapsed",
+        )
+        if _at2.button("Add", use_container_width=True) and _new_tick.strip():
+            st.session_state.wl_tickers = wl_add(_new_tick.strip())
+            st.rerun()
+
+        st.divider()
+        st.markdown("### 📋 Tickers")
+        if not st.session_state.wl_tickers:
+            st.caption("No tickers yet.")
+        else:
+            for _wt in list(st.session_state.wl_tickers):
+                _wc1, _wc2 = st.columns([5, 1])
+                _wc1.markdown(f"**{_wt}**")
+                if _wc2.button("✕", key=f"rm_{_wt}", help=f"Remove {_wt}"):
+                    st.session_state.wl_tickers = wl_remove(_wt)
+                    st.session_state.wl_selected_idx = None
+                    st.rerun()
+
+        st.divider()
+        st.markdown("### ⚙️ Updates")
+        auto_refresh = st.toggle("Auto-refresh quotes", value=True)
+        refresh_secs = st.selectbox(
+            "Interval",
+            [30, 60, 300],
+            format_func=lambda x: f"{x}s" if x < 60 else f"{x // 60} min",
+        )
+        intraday_mode = st.toggle(
+            "Intraday (1-min bars)", value=True,
+            help="Disable for faster daily-close data",
+        )
+
 
 # ── Scan execution ─────────────────────────────────────────────────────────────
 if run_btn:
@@ -277,99 +350,7 @@ if run_btn:
     st.rerun()
 
 
-# ── Main view ──────────────────────────────────────────────────────────────────
-st.markdown("# 📈 KAT Market Screener")
-
-if not st.session_state.results:
-    st.markdown("""
-    **Market-wide stock screener using the KAT grading model (A+ → D).**
-
-    #### Quick start
-    1. Choose **Scan type** and **Mode** in the sidebar
-    2. Set any filters you want
-    3. Hit **🚀 Run Scan**
-
-    | Scan type | Speed | Description |
-    |-----------|-------|-------------|
-    | `watchlist` | ~10s | Tickers from your config watchlist |
-    | `market` | 5-10 min | Full S&P 500 + Nasdaq 100 universe |
-    | `manual` | ~Ns | Any tickers you enter |
-
-    | Mode | Focus |
-    |------|-------|
-    | `short_term` | Volume, momentum, catalysts, technicals |
-    | `long_term` | Revenue growth, balance sheet, FCF, valuation |
-    """)
-    st.info("👈 Configure and run a scan in the sidebar to see results.")
-    st.stop()
-
-# ── Scan summary ───────────────────────────────────────────────────────────────
-meta = st.session_state.scan_meta
-results = st.session_state.results
-
-c1, c2, c3, c4, c5 = st.columns(5)
-c1.metric("Scan", meta.get("scan_type", "—").title())
-c2.metric("Mode", "Short Term" if meta.get("mode") == "short_term" else "Long Term")
-c3.metric("Scanned", meta.get("tickers_scanned", 0))
-c4.metric("Showing", meta.get("tickers_passed", 0))
-c5.metric("Timestamp", meta.get("timestamp", "—")[-8:])  # show HH:MM:SS
-
-if meta.get("failed"):
-    with st.expander(f"⚠️ {len(meta['failed'])} tickers failed to fetch", expanded=False):
-        st.write(", ".join(meta["failed"]))
-
-st.divider()
-
-# ── Results table ──────────────────────────────────────────────────────────────
-rows = []
-for i, r in enumerate(results, 1):
-    price = r.get("price")
-    chg = r.get("day_change_pct")
-    rv = r.get("rel_volume")
-    rows.append({
-        "Rank":    i,
-        "Ticker":  r.get("ticker", ""),
-        "Company": (r.get("company_name") or "")[:28],
-        "Price":   f"${price:.2f}" if price else "N/A",
-        "% Chg":   fmt_pct(chg),
-        "RelVol":  f"{rv:.1f}x" if rv is not None else "N/A",
-        "Mkt Cap": fmt_cap(r.get("market_cap")),
-        "Score":   r.get("kat_score", 0),
-        "Grade":   r.get("kat_grade", "D"),
-        "Setup":   r.get("setup_type", ""),
-        "Action":  r.get("suggested_action", ""),
-        "Conf":    r.get("confidence", ""),
-        "Strongest Reason": (r.get("strongest_reason") or "")[:45],
-        "Biggest Risk":     (r.get("biggest_risk") or "")[:40],
-    })
-
-df = pd.DataFrame(rows)
-
-styled = (
-    df.style
-    .map(grade_color_style,  subset=["Grade"])
-    .map(action_color_style, subset=["Action"])
-    .map(chg_color_style,    subset=["% Chg"])
-    .set_properties(subset=["Rank", "Score"], **{"text-align": "center"})
-)
-
-event = st.dataframe(
-    styled,
-    use_container_width=True,
-    hide_index=True,
-    on_select="rerun",
-    selection_mode="single-row",
-    height=min(700, 60 + len(rows) * 36),
-    key="results_table",
-)
-
-# Handle row selection
-sel_rows = (event.selection or {}).get("rows", [])
-if sel_rows:
-    st.session_state.selected_idx = sel_rows[0]
-
-
-# ── Ticker detail panel ────────────────────────────────────────────────────────
+# ── Ticker detail renderer (shared by screener + watchlist) ────────────────────
 def _render_detail(r: dict):
     ticker  = r.get("ticker", "")
     company = r.get("company_name", ticker)
@@ -383,13 +364,14 @@ def _render_detail(r: dict):
     grade_bg = GRADE_BG.get(grade, "#555")
     chg_color = "#00c853" if (chg or 0) > 0 else "#ef5350"
     chg_str = fmt_pct(chg)
+    price_str = f"${price:.2f}" if price is not None else "N/A"
 
     st.markdown(
         f"""
         <div style="display:flex;align-items:center;gap:16px;margin-bottom:8px">
           <span style="font-size:2rem;font-weight:900">{ticker}</span>
           <span style="font-size:1.1rem;color:#aaa">{company}</span>
-          <span style="font-size:1.5rem;font-weight:bold">${price:.2f}</span>
+          <span style="font-size:1.5rem;font-weight:bold">{price_str}</span>
           <span style="font-size:1.2rem;color:{chg_color};font-weight:bold">{chg_str}</span>
           <span style="background:{grade_bg};color:white;padding:4px 14px;
                        border-radius:6px;font-size:1.4rem;font-weight:900">{grade}</span>
@@ -481,7 +463,6 @@ def _render_detail(r: dict):
         if short_pct:
             st.markdown(f"**Short float:** {short_pct:.1f}%")
 
-        # News headlines
         headlines = r.get("news_headlines") or []
         if headlines:
             with st.expander("Recent headlines"):
@@ -492,13 +473,13 @@ def _render_detail(r: dict):
 
     # ── Action recommendation ───────────────────────────────────────────────────
     action = r.get("suggested_action", "avoid")
-    action_bg = {
+    action_bg_map = {
         "buy": "#1b5e20", "accumulate": "#1b5e20",
         "wait": "#4e342e",
         "watchlist": "#0d47a1",
         "avoid": "#7f0000",
     }
-    bg = next((v for k, v in action_bg.items() if k in action.lower()), "#333")
+    bg = next((v for k, v in action_bg_map.items() if k in action.lower()), "#333")
 
     st.markdown(
         f"""
@@ -524,30 +505,35 @@ def _render_detail(r: dict):
 
     if mode_r == "short_term":
         components = [
-            ("Catalyst / News",     r.get("score_catalyst", 0),     20),
-            ("Relative Volume",     r.get("score_volume", 0),        20),
-            ("Technical Setup",     r.get("score_technical", 0),     20),
-            ("Earnings Timing",     r.get("score_earnings", 0),      15),
-            ("Sector Tailwind",     r.get("score_sector", 0),        10),
-            ("Short Interest",      r.get("score_short_interest", 0), 5),
-            ("Risk Penalty",       -r.get("score_risk_penalty", 0),   5),
+            ("Catalyst / News",     r.get("score_catalyst", 0),      20),
+            ("Relative Volume",     r.get("score_volume", 0),         20),
+            ("Technical Setup",     r.get("score_technical", 0),      20),
+            ("Earnings Timing",     r.get("score_earnings", 0),       15),
+            ("Sector Tailwind",     r.get("score_sector", 0),         10),
+            ("Short Interest",      r.get("score_short_interest", 0),  5),
+            ("Risk Penalty",       -r.get("score_risk_penalty", 0),    5),
         ]
     else:
         components = [
-            ("Revenue Growth",     r.get("score_revenue", 0),        20),
-            ("Earnings Trend",     r.get("score_earnings_lt", 0),    15),
-            ("Balance Sheet",      r.get("score_balance_sheet", 0),  15),
-            ("FCF Trend",          r.get("score_fcf", 0),            15),
-            ("Valuation",          r.get("score_valuation", 0),      10),
-            ("Sector Tailwind",    r.get("score_sector", 0),         10),
-            ("Execution Proxy",    r.get("score_execution", 0),      10),
-            ("Dilution Penalty",  -r.get("score_dilution_penalty", 0), 5),
+            ("Revenue Growth",      r.get("score_revenue", 0),        20),
+            ("Earnings Trend",      r.get("score_earnings_lt", 0),    15),
+            ("Balance Sheet",       r.get("score_balance_sheet", 0),  15),
+            ("FCF Trend",           r.get("score_fcf", 0),            15),
+            ("Valuation",           r.get("score_valuation", 0),      10),
+            ("Sector Tailwind",     r.get("score_sector", 0),         10),
+            ("Execution Proxy",     r.get("score_execution", 0),      10),
+            ("Dilution Penalty",   -r.get("score_dilution_penalty", 0), 5),
         ]
 
     for label, val, mx in components:
         display_val = max(0, val)
         pct = display_val / mx if mx else 0
-        color = "#ef5350" if val < 0 else ("#00c853" if pct >= 0.7 else "#0288d1" if pct >= 0.4 else "#f9a825")
+        color = (
+            "#ef5350" if val < 0 else
+            "#00c853" if pct >= 0.7 else
+            "#0288d1" if pct >= 0.4 else
+            "#f9a825"
+        )
         st.markdown(
             f"""
             <div style="display:flex;align-items:center;gap:10px;margin:4px 0">
@@ -562,11 +548,254 @@ def _render_detail(r: dict):
         )
 
 
+# ── Watchlist main view ────────────────────────────────────────────────────────
+if view == "📋 Live Watchlist":
+    wl_tickers = st.session_state.wl_tickers
+
+    # Auto-refresh timer (fires a full rerun at the selected interval)
+    if _HAS_AUTOREFRESH and auto_refresh and wl_tickers:
+        st_autorefresh(interval=refresh_secs * 1000, key="wl_autorefresh")
+
+    st.markdown("# 📋 Live Watchlist")
+
+    if not wl_tickers:
+        st.info("Your watchlist is empty. Add tickers using the sidebar.")
+        st.stop()
+
+    # Time-gated auto-fetch: initial load or when refresh interval elapses
+    _now_dt  = datetime.now()
+    _last_dt = st.session_state.wl_last_quote_update  # datetime | None
+    _elapsed = (_now_dt - _last_dt).total_seconds() if isinstance(_last_dt, datetime) else None
+    _needs_fetch = (
+        not st.session_state.wl_quotes
+        or (auto_refresh and (_elapsed is None or _elapsed >= refresh_secs - 3))
+    )
+    if _needs_fetch:
+        with st.spinner("Fetching live quotes…"):
+            st.session_state.wl_quotes = fetch_live_quotes(wl_tickers, intraday=intraday_mode)
+            st.session_state.wl_last_quote_update = datetime.now()
+
+    quotes   = st.session_state.wl_quotes
+    analysis = st.session_state.wl_analysis
+    _last_q  = st.session_state.wl_last_quote_update
+    _last_a  = st.session_state.wl_last_analysis_update
+
+    # ── Controls row ──────────────────────────────────────────────────────────
+    _hc1, _hc2, _hc3 = st.columns([2, 2, 3])
+    with _hc1:
+        if st.button("🔄 Refresh Quotes", use_container_width=True):
+            with st.spinner("Fetching…"):
+                st.session_state.wl_quotes = fetch_live_quotes(wl_tickers, intraday=intraday_mode)
+                st.session_state.wl_last_quote_update = datetime.now()
+            st.rerun()
+    with _hc2:
+        if st.button("📊 Run KAT Analysis", use_container_width=True):
+            _score_fn = score_short_term
+            _smaps    = get_sector_mappings(cfg)
+            _wl_res   = {}
+            _prog = st.progress(0.0, text="Analysing watchlist…")
+            for _wi, _wt2 in enumerate(wl_tickers, 1):
+                _prog.progress(_wi / len(wl_tickers), text=f"Scoring {_wt2}…")
+                _wd = fetch_ticker_data(_wt2)
+                if _wd:
+                    try:
+                        _ks = next((s for s, m in _smaps.items() if _wt2 in m), None)
+                        _sc = _score_fn(_wd, kat_sector=_ks)
+                        _wl_res[_wt2] = {**_wd, **_sc, "kat_grade": score_to_grade(_sc["kat_score"])}
+                    except Exception:
+                        pass
+            _prog.empty()
+            st.session_state.wl_analysis = _wl_res
+            st.session_state.wl_last_analysis_update = datetime.now()
+            st.rerun()
+    with _hc3:
+        _qt = _last_q.strftime("%H:%M:%S") if isinstance(_last_q, datetime) else "never"
+        _at = _last_a.strftime("%H:%M:%S") if isinstance(_last_a, datetime) else "not run"
+        st.caption(f"Quotes updated: **{_qt}**  |  Analysis: **{_at}**")
+        if auto_refresh:
+            st.caption(f"Auto-refreshing every {refresh_secs}s")
+
+    st.divider()
+
+    # ── Quotes + analysis table ────────────────────────────────────────────────
+    _wl_rows = []
+    for _wt in wl_tickers:
+        _q  = quotes.get(_wt, {})
+        _a  = analysis.get(_wt, {})
+        _p  = _q.get("price")
+        _c  = _q.get("day_change_pct")
+        _rv = _q.get("rel_volume")
+        _wl_rows.append({
+            "Ticker":  _wt,
+            "Price":   f"${_p:.2f}" if _p is not None else "—",
+            "% Chg":   fmt_pct(_c) if _c is not None else "—",
+            "RelVol":  f"{_rv:.1f}x" if _rv is not None else "—",
+            "Volume":  f"{int(_q['volume']):,}" if _q.get("volume") else "—",
+            "Grade":   _a.get("kat_grade", ""),
+            "Score":   _a.get("kat_score", ""),
+            "Setup":   _a.get("setup_type", ""),
+            "Action":  _a.get("suggested_action", ""),
+            "Updated": _q.get("fetched_at", "")[-8:] if _q.get("fetched_at") else "—",
+        })
+
+    _wl_df = pd.DataFrame(_wl_rows)
+    _grade_col  = ["Grade"]  if "Grade"  in _wl_df.columns else []
+    _action_col = ["Action"] if "Action" in _wl_df.columns else []
+    _chg_col    = ["% Chg"]  if "% Chg"  in _wl_df.columns else []
+    _wl_styled = _wl_df.style
+    if _grade_col:
+        _wl_styled = _wl_styled.map(grade_color_style,  subset=_grade_col)
+    if _action_col:
+        _wl_styled = _wl_styled.map(action_color_style, subset=_action_col)
+    if _chg_col:
+        _wl_styled = _wl_styled.map(chg_color_style,    subset=_chg_col)
+
+    _wl_event = st.dataframe(
+        _wl_styled,
+        use_container_width=True,
+        hide_index=True,
+        on_select="rerun",
+        selection_mode="single-row",
+        height=min(600, 60 + len(_wl_rows) * 36),
+        key="wl_table",
+    )
+
+    _wl_sel = (_wl_event.selection or {}).get("rows", [])
+    if _wl_sel:
+        st.session_state.wl_selected_idx = _wl_sel[0]
+
+    # ── Ticker detail ──────────────────────────────────────────────────────────
+    if st.session_state.wl_selected_idx is not None:
+        _idx = st.session_state.wl_selected_idx
+        if 0 <= _idx < len(wl_tickers):
+            _sel = wl_tickers[_idx]
+            _qa  = analysis.get(_sel)
+            _qq  = quotes.get(_sel, {})
+            if _qa:
+                st.divider()
+                st.markdown(f"### 🔍 Detail — {_sel}")
+                _render_detail(_qa)
+            elif _qq:
+                st.divider()
+                _qp  = _qq.get("price")
+                _qc  = _qq.get("day_change_pct")
+                _qcc = "#00c853" if (_qc or 0) > 0 else "#ef5350"
+                _qp_str = f"${_qp:.2f}" if _qp is not None else "—"
+                st.markdown(
+                    f'<span style="font-size:2rem;font-weight:900">{_sel}</span>'
+                    f'&nbsp;<span style="font-size:1.5rem">{_qp_str}</span>'
+                    f'&nbsp;<span style="color:{_qcc};font-size:1.2rem">{fmt_pct(_qc)}</span>',
+                    unsafe_allow_html=True,
+                )
+                _m1, _m2, _m3, _m4 = st.columns(4)
+                _m1.metric("Price",   _qp_str)
+                _m2.metric("% Chg",   fmt_pct(_qc))
+                _m3.metric("Rel Vol", f"{_qq['rel_volume']:.1f}x" if _qq.get("rel_volume") else "—")
+                _m4.metric("Volume",  f"{int(_qq['volume']):,}" if _qq.get("volume") else "—")
+                st.caption("Click 📊 Run KAT Analysis for full scoring and setup detail.")
+    else:
+        st.caption("👆 Click any row to see ticker detail.")
+
+    st.stop()
+
+
+# ── Screener main view ─────────────────────────────────────────────────────────
+st.markdown("# 📈 KAT Market Screener")
+
+if not st.session_state.results:
+    st.markdown("""
+    **Market-wide stock screener using the KAT grading model (A+ → D).**
+
+    #### Quick start
+    1. Choose **Scan type** and **Mode** in the sidebar
+    2. Set any filters you want
+    3. Hit **🚀 Run Scan**
+
+    | Scan type | Speed | Description |
+    |-----------|-------|-------------|
+    | `watchlist` | ~10s | Tickers from your config watchlist |
+    | `market` | 5-10 min | Full S&P 500 + Nasdaq 100 universe |
+    | `manual` | ~Ns | Any tickers you enter |
+
+    | Mode | Focus |
+    |------|-------|
+    | `short_term` | Volume, momentum, catalysts, technicals |
+    | `long_term` | Revenue growth, balance sheet, FCF, valuation |
+    """)
+    st.info("👈 Configure and run a scan in the sidebar to see results.")
+    st.stop()
+
+# ── Scan summary ───────────────────────────────────────────────────────────────
+meta    = st.session_state.scan_meta
+results = st.session_state.results
+
+c1, c2, c3, c4, c5 = st.columns(5)
+c1.metric("Scan",      meta.get("scan_type", "—").title())
+c2.metric("Mode",      "Short Term" if meta.get("mode") == "short_term" else "Long Term")
+c3.metric("Scanned",   meta.get("tickers_scanned", 0))
+c4.metric("Showing",   meta.get("tickers_passed", 0))
+c5.metric("Timestamp", meta.get("timestamp", "—")[-8:])
+
+if meta.get("failed"):
+    with st.expander(f"⚠️ {len(meta['failed'])} tickers failed to fetch", expanded=False):
+        st.write(", ".join(meta["failed"]))
+
+st.divider()
+
+# ── Results table ──────────────────────────────────────────────────────────────
+rows = []
+for i, r in enumerate(results, 1):
+    price = r.get("price")
+    chg   = r.get("day_change_pct")
+    rv    = r.get("rel_volume")
+    rows.append({
+        "Rank":    i,
+        "Ticker":  r.get("ticker", ""),
+        "Company": (r.get("company_name") or "")[:28],
+        "Price":   f"${price:.2f}" if price else "N/A",
+        "% Chg":   fmt_pct(chg),
+        "RelVol":  f"{rv:.1f}x" if rv is not None else "N/A",
+        "Mkt Cap": fmt_cap(r.get("market_cap")),
+        "Score":   r.get("kat_score", 0),
+        "Grade":   r.get("kat_grade", "D"),
+        "Setup":   r.get("setup_type", ""),
+        "Action":  r.get("suggested_action", ""),
+        "Conf":    r.get("confidence", ""),
+        "Strongest Reason": (r.get("strongest_reason") or "")[:45],
+        "Biggest Risk":     (r.get("biggest_risk") or "")[:40],
+    })
+
+df = pd.DataFrame(rows)
+
+styled = (
+    df.style
+    .map(grade_color_style,  subset=["Grade"])
+    .map(action_color_style, subset=["Action"])
+    .map(chg_color_style,    subset=["% Chg"])
+    .set_properties(subset=["Rank", "Score"], **{"text-align": "center"})
+)
+
+event = st.dataframe(
+    styled,
+    use_container_width=True,
+    hide_index=True,
+    on_select="rerun",
+    selection_mode="single-row",
+    height=min(700, 60 + len(rows) * 36),
+    key="results_table",
+)
+
+sel_rows = (event.selection or {}).get("rows", [])
+if sel_rows:
+    st.session_state.selected_idx = sel_rows[0]
+
+
+# ── Ticker detail panel ────────────────────────────────────────────────────────
 if st.session_state.selected_idx is not None:
     idx = st.session_state.selected_idx
     if 0 <= idx < len(results):
         st.divider()
-        st.markdown(f"### 🔍 Ticker Detail — click another row to switch")
+        st.markdown("### 🔍 Ticker Detail — click another row to switch")
         _render_detail(results[idx])
 else:
     st.caption("👆 Click any row in the table to see full ticker detail.")
